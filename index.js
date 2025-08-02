@@ -8,7 +8,7 @@ const port = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
-app.post("/", async (req, res) => {
+function buildMessage(entry) {
   const {
     title,
     rawText,
@@ -18,7 +18,7 @@ app.post("/", async (req, res) => {
     confidenceNotes,
     Source,
     Timestamp,
-  } = req.body;
+  } = entry;
 
   const formattedTags = Array.isArray(Tags)
     ? Tags.map((tag) => `#${tag}`).join(" ")
@@ -44,7 +44,12 @@ app.post("/", async (req, res) => {
 **🧾 Raw Input:**  
 ${rawText || "No raw input provided."}`;
 
-  const messagePayload = { content: messageContent };
+  return { content: messageContent };
+}
+
+// Optional: still allow manual POST
+app.post("/", async (req, res) => {
+  const messagePayload = buildMessage(req.body);
 
   try {
     await Promise.all([
@@ -61,17 +66,21 @@ ${rawText || "No raw input provided."}`;
   }
 });
 
-// ✅ THIS is what actually checks Notion every 60s
+// ✅ Poll Notion and send new entries directly
 setInterval(async () => {
   console.log("🔁 Checking Notion for new entries...");
   const newEntries = await fetchNewEntries();
 
   for (const entry of newEntries) {
+    const messagePayload = buildMessage(entry);
     try {
-      await axios.post(`http://localhost:${port}/`, entry);
-      console.log("✅ Dispatched new entry to internal POST /");
+      await Promise.all([
+        axios.post(process.env.DISCORD_WEBHOOK_GLOBAL, messagePayload),
+        axios.post(process.env.DISCORD_WEBHOOK_PERSONAL, messagePayload),
+      ]);
+      console.log("✅ Sent new entry to Discord");
     } catch (err) {
-      console.error("❌ Error sending to internal route:", err.message);
+      console.error("❌ Error sending to Discord:", err.message);
     }
   }
 }, 60000);

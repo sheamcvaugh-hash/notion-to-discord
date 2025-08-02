@@ -9,26 +9,25 @@ async function fetchNewEntries() {
   const response = await notion.databases.query({
     database_id: dbId,
     sorts: [{ property: "Timestamp", direction: "descending" }],
-    page_size: 5,
+    page_size: 10,
   });
 
-  const entries = [];
+  const newEntries = [];
 
   for (const result of response.results) {
     const props = result.properties;
-
     const timestamp = props.Timestamp?.date?.start;
-    if (!timestamp || timestamp === lastTimestamp) continue;
 
-    lastTimestamp = timestamp;
+    if (!timestamp) continue;
+
+    // Skip if entry is older or same as last known
+    if (lastTimestamp && timestamp <= lastTimestamp) continue;
 
     // Dynamically find the title column (only one will be of type "title")
-    const titleProp = Object.values(props).find(
-      (p) => p.type === "title"
-    );
+    const titleProp = Object.values(props).find((p) => p.type === "title");
     const rawInputProp = props["Raw Input"] || props["content"];
 
-    entries.push({
+    newEntries.push({
       title: titleProp?.title?.[0]?.plain_text || "Untitled",
       rawText: rawInputProp?.rich_text?.[0]?.plain_text || "",
       Type: props.Type?.select?.name || null,
@@ -40,7 +39,12 @@ async function fetchNewEntries() {
     });
   }
 
-  return entries;
+  // Update last seen timestamp only if we found new ones
+  if (newEntries.length > 0) {
+    lastTimestamp = newEntries[0].Timestamp;
+  }
+
+  return newEntries.reverse(); // oldest first
 }
 
 module.exports = { fetchNewEntries };

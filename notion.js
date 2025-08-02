@@ -1,6 +1,6 @@
 const axios = require("axios");
 
-const NOTION_TOKEN = process.env.NOTION_TOKEN;
+const NOTION_TOKEN = process.env.NOTION_SECRET;
 const DATABASE_ID = process.env.NOTION_DATABASE_ID;
 
 let lastChecked = new Date().toISOString();

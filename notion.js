@@ -13,19 +13,27 @@ async function fetchNewEntries() {
   });
 
   const newEntries = [];
-  let highestTimestamp = lastTimestamp;
+  let newestSeen = null;
 
   for (const result of response.results) {
     const props = result.properties;
-    const timestamp = props.Timestamp?.date?.start;
+    const timestampStr = props.Timestamp?.date?.start;
 
-    if (!timestamp) continue;
+    if (!timestampStr) continue;
 
-    if (lastTimestamp && timestamp <= lastTimestamp) continue;
+    const entryTime = new Date(timestampStr);
 
-    // Update the highest timestamp seen
-    if (!highestTimestamp || timestamp > highestTimestamp) {
-      highestTimestamp = timestamp;
+    // Diagnostic logging
+    if (lastTimestamp) {
+      console.log(`[⏱] Comparing entry: ${entryTime.toISOString()} > ${lastTimestamp.toISOString()} ?`);
+    } else {
+      console.log(`[⏱] First run. Accepting entry: ${entryTime.toISOString()}`);
+    }
+
+    if (lastTimestamp && entryTime <= lastTimestamp) continue;
+
+    if (!newestSeen || entryTime > newestSeen) {
+      newestSeen = entryTime;
     }
 
     const titleProp = Object.values(props).find((p) => p.type === "title");
@@ -39,16 +47,16 @@ async function fetchNewEntries() {
       Confidence: props.Confidence?.select?.name || null,
       confidenceNotes: props.confidenceNotes?.rich_text?.[0]?.plain_text || "",
       Source: props.Source?.select?.name || null,
-      Timestamp: timestamp,
+      Timestamp: timestampStr,
     });
   }
 
-  // Set lastTimestamp to the latest we've seen, not just the first result
-  if (highestTimestamp) {
-    lastTimestamp = highestTimestamp;
+  if (newestSeen) {
+    lastTimestamp = newestSeen;
+    console.log(`[✅] Updated lastTimestamp to ${lastTimestamp.toISOString()}`);
   }
 
-  return newEntries.reverse(); // oldest first
+  return newEntries.reverse(); // Oldest first
 }
 
 module.exports = { fetchNewEntries };

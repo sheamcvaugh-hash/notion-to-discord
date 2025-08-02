@@ -1,85 +1,40 @@
-const express = require("express");
-const bodyParser = require("body-parser");
-const axios = require("axios");
-const { fetchNewEntries } = require("./notion");
+const { Client } = require("@notionhq/client");
+const notion = new Client({ auth: process.env.NOTION_SECRET });
 
-const app = express();
-const port = process.env.PORT || 3000;
+let lastTimestamp = null;
 
-app.use(bodyParser.json());
+async function fetchNewEntries() {
+  const dbId = process.env.NOTION_DATABASE_ID;
 
-app.post("/", async (req, res) => {
-  const {
-    title,
-    rawText,
-    Type,
-    Tags,
-    Confidence,
-    confidenceNotes,
-    Source,
-    Timestamp,
-  } = req.body;
+  const response = await notion.databases.query({
+    database_id: dbId,
+    sorts: [{ property: "Timestamp", direction: "descending" }],
+    page_size: 5,
+  });
 
-  const formattedTags = Array.isArray(Tags)
-    ? Tags.map((tag) => `#${tag}`).join(" ")
-    : "";
+  const entries = [];
 
-  let messageContent = `🧠 **New Digital Brain Entry Logged**
+  for (const result of response.results) {
+    const props = result.properties;
 
-**📝 Title:** ${title || "Untitled"}
+    const timestamp = props.Timestamp?.date?.start;
+    if (!timestamp || timestamp === lastTimestamp) break;
 
-**🗂 Type:** ${Type || "Uncategorized"}  
-**🏷 Tags:** ${formattedTags}  
-**📈 Confidence:** ${Confidence || "Unknown"}`;
+    lastTimestamp = timestamp;
 
-  if (confidenceNotes) {
-    messageContent += `  
-**🧾 Confidence Notes:** ${confidenceNotes}`;
+    entries.push({
+      title: props.title?.title[0]?.plain_text || "Untitled",
+      rawText: props.content?.rich_text[0]?.plain_text || "",
+      Type: props.Type?.select?.name,
+      Tags: props.Tags?.multi_select?.map((tag) => tag.name),
+      Confidence: props.Confidence?.select?.name,
+      confidenceNotes: props.confidenceNotes?.rich_text[0]?.plain_text || "",
+      Source: props.Source?.select?.name,
+      Timestamp: timestamp,
+    });
   }
 
-  messageContent += `  
-**📤 Source:** ${Source || "Unknown"}  
-**🕒 Timestamp:** ${Timestamp || "No timestamp"}
+  return entries;
+}
 
-**🧾 Raw Input:**  
-${rawText || "No raw input provided."}`;
-
-  const messagePayload = { content: messageContent };
-
-  try {
-    await Promise.all([
-      axios.post(process.env.DISCORD_WEBHOOK_GLOBAL, messagePayload),
-      axios.post(process.env.DISCORD_WEBHOOK_PERSONAL, messagePayload),
-    ]);
-    res.status(200).send("Message sent to both Discord channels");
-  } catch (error) {
-    console.error(
-      "Error posting to Discord:",
-      error.response?.data || error.message
-    );
-    res.status(500).send("Failed to post to Discord");
-  }
-});
-
-setInterval(async () => {
-  console.log("Checking Notion for new entries...");
-  const newEntries = await fetchNewEntries();
-
-  for (const entry of newEntries) {
-    try {
-      await axios.post("http://localhost:" + port + "/", entry);
-      console.log("Dispatched new entry to internal POST /");
-    } catch (err) {
-      console.error("Error sending to internal route:", err.message);
-    }
-  }
-}, 60000);
-
-// Keepalive route to prevent autosuspend
-app.get("/keepalive", (req, res) => {
-  res.status(200).send("👋 I'm alive");
-});
-
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
+module.exports = { fetchNewEntries };

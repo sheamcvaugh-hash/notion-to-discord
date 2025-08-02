@@ -1,6 +1,7 @@
 const express = require("express");
 const bodyParser = require("body-parser");
 const axios = require("axios");
+const { fetchNewEntries } = require("./notion");
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -60,11 +61,26 @@ ${rawText || "No raw input provided."}`;
   }
 });
 
-// Keepalive route to prevent autosuspend
+// ✅ THIS is what actually checks Notion every 60s
+setInterval(async () => {
+  console.log("🔁 Checking Notion for new entries...");
+  const newEntries = await fetchNewEntries();
+
+  for (const entry of newEntries) {
+    try {
+      await axios.post(`http://localhost:${port}/`, entry);
+      console.log("✅ Dispatched new entry to internal POST /");
+    } catch (err) {
+      console.error("❌ Error sending to internal route:", err.message);
+    }
+  }
+}, 60000);
+
+// Keepalive route
 app.get("/keepalive", (req, res) => {
   res.status(200).send("👋 I'm alive");
 });
 
-app.listen(port, "0.0.0.0", () => {
-  console.log(`Server running on port ${port}`);
+app.listen(port, () => {
+  console.log(`✅ Server running on port ${port}`);
 });

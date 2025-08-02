@@ -1,7 +1,9 @@
 const { Client } = require("@notionhq/client");
 const notion = new Client({ auth: process.env.NOTION_SECRET });
 
-let lastTimestamp = null;
+const { loadSentIds, saveSentIds } = require("./sentCache");
+
+let sentIds = loadSentIds();
 
 async function fetchNewEntries() {
   const dbId = process.env.NOTION_DATABASE_ID;
@@ -9,37 +11,26 @@ async function fetchNewEntries() {
   const response = await notion.databases.query({
     database_id: dbId,
     sorts: [{ property: "Timestamp", direction: "descending" }],
-    page_size: 10,
+    page_size: 50,
   });
 
   const newEntries = [];
-  let newestSeen = null;
 
   for (const result of response.results) {
+    const id = result.id;
     const props = result.properties;
-    const timestampStr = props.Timestamp?.date?.start;
+    const timestamp = props.Timestamp?.date?.start;
 
-    if (!timestampStr) continue;
+    if (!timestamp || sentIds.has(id)) continue;
 
-    const entryTime = new Date(timestampStr);
+    console.log(`[🆕] New entry found: ${id}`);
 
-    // Diagnostic logging
-    if (lastTimestamp) {
-      console.log(`[⏱] Comparing entry: ${entryTime.toISOString()} > ${lastTimestamp.toISOString()} ?`);
-    } else {
-      console.log(`[⏱] First run. Accepting entry: ${entryTime.toISOString()}`);
-    }
-
-    if (lastTimestamp && entryTime <= lastTimestamp) continue;
-
-    if (!newestSeen || entryTime > newestSeen) {
-      newestSeen = entryTime;
-    }
-
+    // Dynamically find the title column
     const titleProp = Object.values(props).find((p) => p.type === "title");
     const rawInputProp = props["Raw Input"] || props["content"];
 
     newEntries.push({
+      id,
       title: titleProp?.title?.[0]?.plain_text || "Untitled",
       rawText: rawInputProp?.rich_text?.[0]?.plain_text || "",
       Type: props.Type?.select?.name || null,
@@ -47,13 +38,18 @@ async function fetchNewEntries() {
       Confidence: props.Confidence?.select?.name || null,
       confidenceNotes: props.confidenceNotes?.rich_text?.[0]?.plain_text || "",
       Source: props.Source?.select?.name || null,
-      Timestamp: timestampStr,
+      Timestamp: timestamp,
     });
   }
 
-  if (newestSeen) {
-    lastTimestamp = newestSeen;
-    console.log(`[✅] Updated lastTimestamp to ${lastTimestamp.toISOString()}`);
+  // Update the sent cache with newly sent IDs
+  for (const entry of newEntries) {
+    sentIds.add(entry.id);
+  }
+
+  if (newEntries.length > 0) {
+    saveSentIds(sentIds);
+    console.log(`[💾] Cache updated with ${newEntries.length} new IDs`);
   }
 
   return newEntries.reverse(); // Oldest first

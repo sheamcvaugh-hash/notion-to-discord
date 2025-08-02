@@ -1,7 +1,6 @@
 const express = require("express");
 const bodyParser = require("body-parser");
 const axios = require("axios");
-const { fetchNewEntries } = require("./notion");
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -11,11 +10,11 @@ app.use(bodyParser.json());
 app.post("/", async (req, res) => {
   const {
     title,
-    "Raw Text": rawText,
+    rawText,
     Type,
     Tags,
     Confidence,
-    "Confidence Notes": confidenceNotes,
+    confidenceNotes,
     Source,
     Timestamp,
   } = req.body;
@@ -60,20 +59,6 @@ ${rawText || "No raw input provided."}`;
     res.status(500).send("Failed to post to Discord");
   }
 });
-
-setInterval(async () => {
-  console.log("Checking Notion for new entries...");
-  const newEntries = await fetchNewEntries();
-
-  for (const entry of newEntries) {
-    try {
-      await axios.post("http://localhost:" + port + "/", entry);
-      console.log("Dispatched new entry to internal POST /");
-    } catch (err) {
-      console.error("Error sending to internal route:", err.message);
-    }
-  }
-}, 60000);
 
 // Keepalive route to prevent autosuspend
 app.get("/keepalive", (req, res) => {

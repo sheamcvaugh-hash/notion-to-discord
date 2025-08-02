@@ -8,29 +8,70 @@ const port = process.env.PORT || 3000;
 app.use(bodyParser.json());
 
 app.post("/", async (req, res) => {
-  const { title, content, type } = req.body;
+  const {
+    title,
+    "Raw Text": rawText,
+    Type,
+    Tags,
+    Confidence,
+    "Confidence Notes": confidenceNotes,
+    Source,
+    Timestamp,
+  } = req.body;
 
-  console.log("Incoming payload:", { title, content, type });
+  console.log("Incoming payload:", {
+    title,
+    rawText,
+    Type,
+    Tags,
+    Confidence,
+    confidenceNotes,
+    Source,
+    Timestamp,
+  });
 
-  const message = {
-    embeds: [
-      {
-        title: title || "Untitled",
-        description: content || "No content provided",
-        color: type === "personal" ? 0x3498db : 0x2ecc71, // blue vs green
-      },
-    ],
+  // Format tags as hashtags
+  const formattedTags = Array.isArray(Tags)
+    ? Tags.map((tag) => `#${tag}`).join(" ")
+    : "";
+
+  // Build message content
+  let messageContent = `🧠 **New Digital Brain Entry Logged**
+
+**📝 Title:** ${title || "Untitled"}
+
+**🗂 Type:** ${Type || "Uncategorized"}  
+**🏷 Tags:** ${formattedTags}  
+**📈 Confidence:** ${Confidence || "Unknown"}`;
+
+  if (confidenceNotes) {
+    messageContent += `  
+**🧾 Confidence Notes:** ${confidenceNotes}`;
+  }
+
+  messageContent += `  
+**📤 Source:** ${Source || "Unknown"}  
+**🕒 Timestamp:** ${Timestamp || "No timestamp"}
+
+**🧾 Raw Input:**  
+${rawText || "No raw input provided."}`;
+
+  const messagePayload = {
+    content: messageContent,
   };
 
   try {
-    if (type === "personal") {
-      await axios.post(process.env.DISCORD_WEBHOOK_PERSONAL, message);
-    } else {
-      await axios.post(process.env.DISCORD_WEBHOOK_GLOBAL, message);
-    }
-    res.status(200).send("Message sent to Discord");
+    await Promise.all([
+      axios.post(process.env.DISCORD_WEBHOOK_GLOBAL, messagePayload),
+      axios.post(process.env.DISCORD_WEBHOOK_PERSONAL, messagePayload),
+    ]);
+
+    res.status(200).send("Message sent to both Discord channels");
   } catch (error) {
-    console.error("Error posting to Discord:", error.response?.data || error.message);
+    console.error(
+      "Error posting to Discord:",
+      error.response?.data || error.message
+    );
     res.status(500).send("Failed to post to Discord");
   }
 });

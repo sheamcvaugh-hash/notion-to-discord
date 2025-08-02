@@ -1,6 +1,7 @@
 const express = require("express");
 const bodyParser = require("body-parser");
 const axios = require("axios");
+const { fetchNewEntries } = require("./notion");
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -19,23 +20,10 @@ app.post("/", async (req, res) => {
     Timestamp,
   } = req.body;
 
-  console.log("Incoming payload:", {
-    title,
-    rawText,
-    Type,
-    Tags,
-    Confidence,
-    confidenceNotes,
-    Source,
-    Timestamp,
-  });
-
-  // Format tags as hashtags
   const formattedTags = Array.isArray(Tags)
     ? Tags.map((tag) => `#${tag}`).join(" ")
     : "";
 
-  // Build message content
   let messageContent = `🧠 **New Digital Brain Entry Logged**
 
 **📝 Title:** ${title || "Untitled"}
@@ -56,16 +44,13 @@ app.post("/", async (req, res) => {
 **🧾 Raw Input:**  
 ${rawText || "No raw input provided."}`;
 
-  const messagePayload = {
-    content: messageContent,
-  };
+  const messagePayload = { content: messageContent };
 
   try {
     await Promise.all([
       axios.post(process.env.DISCORD_WEBHOOK_GLOBAL, messagePayload),
       axios.post(process.env.DISCORD_WEBHOOK_PERSONAL, messagePayload),
     ]);
-
     res.status(200).send("Message sent to both Discord channels");
   } catch (error) {
     console.error(
@@ -75,6 +60,21 @@ ${rawText || "No raw input provided."}`;
     res.status(500).send("Failed to post to Discord");
   }
 });
+
+// 🔁 Background polling every 60 seconds
+setInterval(async () => {
+  console.log("Checking Notion for new entries...");
+  const newEntries = await fetchNewEntries();
+
+  for (const entry of newEntries) {
+    try {
+      await axios.post("http://localhost:" + port + "/", entry);
+      console.log("Dispatched new entry to internal POST /");
+    } catch (err) {
+      console.error("Error sending to internal route:", err.message);
+    }
+  }
+}, 60000); // 60,000 ms = 60 seconds
 
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);

@@ -13,6 +13,7 @@ async function fetchNewEntries() {
   });
 
   const newEntries = [];
+  let highestTimestamp = lastTimestamp;
 
   for (const result of response.results) {
     const props = result.properties;
@@ -20,10 +21,13 @@ async function fetchNewEntries() {
 
     if (!timestamp) continue;
 
-    // Skip if entry is older or same as last known
     if (lastTimestamp && timestamp <= lastTimestamp) continue;
 
-    // Dynamically find the title column (only one will be of type "title")
+    // Update the highest timestamp seen
+    if (!highestTimestamp || timestamp > highestTimestamp) {
+      highestTimestamp = timestamp;
+    }
+
     const titleProp = Object.values(props).find((p) => p.type === "title");
     const rawInputProp = props["Raw Input"] || props["content"];
 
@@ -39,9 +43,9 @@ async function fetchNewEntries() {
     });
   }
 
-  // Update last seen timestamp only if we found new ones
-  if (newEntries.length > 0) {
-    lastTimestamp = newEntries[0].Timestamp;
+  // Set lastTimestamp to the latest we've seen, not just the first result
+  if (highestTimestamp) {
+    lastTimestamp = highestTimestamp;
   }
 
   return newEntries.reverse(); // oldest first

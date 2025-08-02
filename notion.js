@@ -18,7 +18,7 @@ async function fetchNewEntries() {
     const props = result.properties;
 
     const timestamp = props.Timestamp?.date?.start;
-    if (!timestamp || timestamp === lastTimestamp) break;
+    if (!timestamp || timestamp === lastTimestamp) continue;
 
     lastTimestamp = timestamp;
 

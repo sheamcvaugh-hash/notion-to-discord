@@ -7,7 +7,9 @@ app.use(express.json());
 
 app.post("/notion-webhook", async (req, res) => {
   const data = req.body;
-  const { title, content } = data;
+  const { title, content, type } = data;
+
+  console.log("Incoming payload:", JSON.stringify(data, null, 2));
 
   const webhooks = [
     process.env.DISCORD_WEBHOOK_PERSONAL,
@@ -16,9 +18,17 @@ app.post("/notion-webhook", async (req, res) => {
 
   try {
     for (const webhook of webhooks) {
-      await axios.post(webhook, {
-        content: `**${title}**\n${content}`
-      });
+      if (!webhook) {
+        console.error("Missing webhook URL in environment variables.");
+        continue;
+      }
+
+      const discordPayload = {
+        content: `**${title}**\n${content}\n\n_Type:_ ${type}`
+      };
+
+      const response = await axios.post(webhook, discordPayload);
+      console.log(`Posted to Discord: ${response.status}`);
     }
 
     res.status(200).send("Posted to both Discord channels.");

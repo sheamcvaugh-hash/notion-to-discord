@@ -22,14 +22,20 @@ async function fetchNewEntries() {
 
     lastTimestamp = timestamp;
 
+    // Dynamically find the title column (only one will be of type "title")
+    const titleProp = Object.values(props).find(
+      (p) => p.type === "title"
+    );
+    const rawInputProp = props["Raw Input"] || props["content"];
+
     entries.push({
-      title: props.title?.title[0]?.plain_text || "Untitled",
-      rawText: props.content?.rich_text[0]?.plain_text || "",
-      Type: props.Type?.select?.name,
-      Tags: props.Tags?.multi_select?.map((tag) => tag.name),
-      Confidence: props.Confidence?.select?.name,
-      confidenceNotes: props.confidenceNotes?.rich_text[0]?.plain_text || "",
-      Source: props.Source?.select?.name,
+      title: titleProp?.title?.[0]?.plain_text || "Untitled",
+      rawText: rawInputProp?.rich_text?.[0]?.plain_text || "",
+      Type: props.Type?.select?.name || null,
+      Tags: props.Tags?.multi_select?.map((tag) => tag.name) || [],
+      Confidence: props.Confidence?.select?.name || null,
+      confidenceNotes: props.confidenceNotes?.rich_text?.[0]?.plain_text || "",
+      Source: props.Source?.select?.name || null,
       Timestamp: timestamp,
     });
   }

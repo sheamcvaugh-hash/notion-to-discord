@@ -1,6 +1,6 @@
 const axios = require("axios");
 
-const NOTION_TOKEN = process.env.NOTION_SECRET;
+const NOTION_SECRET = process.env.NOTION_SECRET;
 const DATABASE_ID = process.env.NOTION_DATABASE_ID;
 
 let lastChecked = new Date().toISOString();
@@ -25,7 +25,7 @@ async function fetchNewEntries() {
       },
       {
         headers: {
-          Authorization: `Bearer ${NOTION_TOKEN}`,
+          Authorization: `Bearer ${NOTION_SECRET}`,
           "Notion-Version": "2022-06-28",
           "Content-Type": "application/json",
         },

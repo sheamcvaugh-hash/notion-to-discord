@@ -61,7 +61,6 @@ ${rawText || "No raw input provided."}`;
   }
 });
 
-// 🔁 Background polling every 60 seconds
 setInterval(async () => {
   console.log("Checking Notion for new entries...");
   const newEntries = await fetchNewEntries();
@@ -74,7 +73,12 @@ setInterval(async () => {
       console.error("Error sending to internal route:", err.message);
     }
   }
-}, 60000); // 60,000 ms = 60 seconds
+}, 60000);
+
+// Keepalive route to prevent autosuspend
+app.get("/keepalive", (req, res) => {
+  res.status(200).send("OK");
+});
 
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);

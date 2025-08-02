@@ -21,28 +21,28 @@ app.post("/", async (req, res) => {
   } = req.body;
 
   const formattedTags = Array.isArray(Tags)
-    ? Tags.map((tag) => #${tag}).join(" ")
+    ? Tags.map((tag) => `#${tag}`).join(" ")
     : "";
 
-  let messageContent = 🧠 **New Digital Brain Entry Logged**
+  let messageContent = `🧠 **New Digital Brain Entry Logged**
 
 **📝 Title:** ${title || "Untitled"}
 
 **🗂 Type:** ${Type || "Uncategorized"}  
 **🏷 Tags:** ${formattedTags}  
-**📈 Confidence:** ${Confidence || "Unknown"};
+**📈 Confidence:** ${Confidence || "Unknown"}`;
 
   if (confidenceNotes) {
-    messageContent +=   
-**🧾 Confidence Notes:** ${confidenceNotes};
+    messageContent += `  
+**🧾 Confidence Notes:** ${confidenceNotes}`;
   }
 
-  messageContent +=   
+  messageContent += `  
 **📤 Source:** ${Source || "Unknown"}  
 **🕒 Timestamp:** ${Timestamp || "No timestamp"}
 
 **🧾 Raw Input:**  
-${rawText || "No raw input provided."};
+${rawText || "No raw input provided."}`;
 
   const messagePayload = { content: messageContent };
 
@@ -68,7 +68,7 @@ setInterval(async () => {
 
   for (const entry of newEntries) {
     try {
-      await axios.post(http://localhost:${port}/, entry);
+      await axios.post(`http://localhost:${port}/`, entry);
       console.log("✅ Dispatched new entry to internal POST /");
     } catch (err) {
       console.error("❌ Error sending to internal route:", err.message);
@@ -82,5 +82,5 @@ app.get("/keepalive", (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(✅ Server running on port ${port});
+  console.log(`✅ Server running on port ${port}`);
 });

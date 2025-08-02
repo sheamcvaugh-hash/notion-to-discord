@@ -1,91 +1,85 @@
+const express = require("express");
+const bodyParser = require("body-parser");
 const axios = require("axios");
+const { fetchNewEntries } = require("./notion");
 
-const NOTION_SECRET = process.env.NOTION_SECRET;
-const DATABASE_ID = process.env.NOTION_DATABASE_ID;
+const app = express();
+const port = process.env.PORT || 3000;
 
-// DEBUG: Log first 6 characters of secret to verify it's injected
-console.log("NOTION_SECRET starts with:", NOTION_SECRET?.slice(0, 6));
+app.use(bodyParser.json());
 
-let lastChecked = new Date().toISOString();
+app.post("/", async (req, res) => {
+  const {
+    title,
+    rawText,
+    Type,
+    Tags,
+    Confidence,
+    confidenceNotes,
+    Source,
+    Timestamp,
+  } = req.body;
 
-async function fetchNewEntries() {
-  try {
-    const response = await axios.post(
-      `https://api.notion.com/v1/databases/${DATABASE_ID}/query`,
-      {
-        filter: {
-          timestamp: "created_time",
-          created_time: {
-            after: lastChecked,
-          },
-        },
-        sorts: [
-          {
-            timestamp: "created_time",
-            direction: "ascending",
-          },
-        ],
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${NOTION_SECRET}`,
-          "Notion-Version": "2022-06-28",
-          "Content-Type": "application/json",
-        },
-      }
-    );
+  const formattedTags = Array.isArray(Tags)
+    ? Tags.map((tag) => `#${tag}`).join(" ")
+    : "";
 
-    const results = response.data.results || [];
-    if (results.length > 0) {
-      lastChecked = new Date().toISOString(); // advance cursor
-    }
+  let messageContent = `🧠 **New Digital Brain Entry Logged**
 
-    return results.map(mapNotionPageToPayload);
-  } catch (error) {
-    console.error("❌ Failed to fetch Notion entries:", error.message);
-    if (error.response) {
-      console.error("Response data:", JSON.stringify(error.response.data));
-    }
-    return [];
+**📝 Title:** ${title || "Untitled"}
+
+**🗂 Type:** ${Type || "Uncategorized"}  
+**🏷 Tags:** ${formattedTags}  
+**📈 Confidence:** ${Confidence || "Unknown"}`;
+
+  if (confidenceNotes) {
+    messageContent += `  
+**🧾 Confidence Notes:** ${confidenceNotes}`;
   }
-}
 
-// ----------- Field Extractors -----------
+  messageContent += `  
+**📤 Source:** ${Source || "Unknown"}  
+**🕒 Timestamp:** ${Timestamp || "No timestamp"}
 
-function getPlainText(richTextArray) {
-  if (!Array.isArray(richTextArray)) return "";
-  return richTextArray.map((t) => t.plain_text).join(" ");
-}
+**🧾 Raw Input:**  
+${rawText || "No raw input provided."}`;
 
-function getSelectValue(field) {
-  return field?.select?.name || "";
-}
+  const messagePayload = { content: messageContent };
 
-function getMultiSelect(field) {
-  return (field?.multi_select || []).map((t) => t.name);
-}
+  try {
+    await Promise.all([
+      axios.post(process.env.DISCORD_WEBHOOK_GLOBAL, messagePayload),
+      axios.post(process.env.DISCORD_WEBHOOK_PERSONAL, messagePayload),
+    ]);
+    res.status(200).send("Message sent to both Discord channels");
+  } catch (error) {
+    console.error(
+      "Error posting to Discord:",
+      error.response?.data || error.message
+    );
+    res.status(500).send("Failed to post to Discord");
+  }
+});
 
-function getDate(field) {
-  return field?.date?.start || null;
-}
+setInterval(async () => {
+  console.log("Checking Notion for new entries...");
+  const newEntries = await fetchNewEntries();
 
-// ----------- Mapper -----------
+  for (const entry of newEntries) {
+    try {
+      await axios.post("http://localhost:" + port + "/", entry);
+      console.log("Dispatched new entry to internal POST /");
+    } catch (err) {
+      console.error("Error sending to internal route:", err.message);
+    }
+  }
+}, 60000);
 
-function mapNotionPageToPayload(page) {
-  const props = page.properties;
+// Keepalive route to prevent autosuspend
+app.get("/keepalive", (req, res) => {
+  res.status(200).send("👋 I'm alive");
+});
 
-  return {
-    title: getPlainText(props["Core Brain Database"]?.title),
-    rawText: getPlainText(props["Raw Input"]?.rich_text),
-    Type: getSelectValue(props["Type"]),
-    Tags: getMultiSelect(props["Tags"]),
-    Confidence: getSelectValue(props["Confidence"]),
-    confidenceNotes: getPlainText(props["Confidence Notes"]?.rich_text),
-    Source: getSelectValue(props["Source"]),
-    Timestamp: getDate(props["Timestamp"]) || page.created_time,
-  };
-}
-
-module.exports = {
-  fetchNewEntries,
-};
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+});

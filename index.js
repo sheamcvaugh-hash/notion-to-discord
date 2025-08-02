@@ -7,18 +7,21 @@ app.use(express.json());
 
 app.post("/notion-webhook", async (req, res) => {
   const data = req.body;
-  const { title, content, type } = data;
+  const { title, content } = data;
 
-  const webhookURL = type === "personal"
-    ? process.env.DISCORD_WEBHOOK_PERSONAL
-    : process.env.DISCORD_WEBHOOK_GLOBAL;
+  const webhooks = [
+    process.env.DISCORD_WEBHOOK_PERSONAL,
+    process.env.DISCORD_WEBHOOK_GLOBAL
+  ];
 
   try {
-    await axios.post(webhookURL, {
-      content: `**${title}**\n${content}`
-    });
+    for (const webhook of webhooks) {
+      await axios.post(webhook, {
+        content: `**${title}**\n${content}`
+      });
+    }
 
-    res.status(200).send("Posted to Discord.");
+    res.status(200).send("Posted to both Discord channels.");
   } catch (err) {
     console.error("Error posting to Discord:", err.message);
     res.status(500).send("Failed to post to Discord.");
@@ -27,3 +30,4 @@ app.post("/notion-webhook", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+

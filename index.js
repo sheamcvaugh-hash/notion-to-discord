@@ -23,11 +23,10 @@ app.post("/notion-webhook", async (req, res) => {
 
     res.status(200).send("Posted to both Discord channels.");
   } catch (err) {
-    console.error("Error posting to Discord:", err.message);
+    console.error("Error posting to Discord:", err.response?.data || err.message);
     res.status(500).send("Failed to post to Discord.");
   }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-

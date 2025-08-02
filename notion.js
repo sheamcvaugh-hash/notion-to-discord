@@ -1,0 +1,76 @@
+const axios = require("axios");
+
+const NOTION_TOKEN = process.env.NOTION_TOKEN;
+const DATABASE_ID = process.env.NOTION_DATABASE_ID;
+
+let lastChecked = new Date().toISOString();
+
+async function fetchNewEntries() {
+  try {
+    const response = await axios.post(
+      "https://api.notion.com/v1/databases/" + DATABASE_ID + "/query",
+      {
+        filter: {
+          timestamp: "created_time",
+          created_time: {
+            after: lastChecked,
+          },
+        },
+        sorts: [
+          {
+            timestamp: "created_time",
+            direction: "ascending",
+          },
+        ],
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${NOTION_TOKEN}`,
+          "Notion-Version": "2022-06-28",
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    const results = response.data.results || [];
+    if (results.length > 0) {
+      lastChecked = new Date().toISOString(); // advance cursor
+    }
+
+    return results.map((page) => mapNotionPageToPayload(page));
+  } catch (error) {
+    console.error("Failed to fetch Notion entries:", error.message);
+    return [];
+  }
+}
+
+function getPlainText(richTextArray) {
+  if (!Array.isArray(richTextArray)) return "";
+  return richTextArray.map((t) => t.plain_text).join(" ");
+}
+
+function getSelectValue(field) {
+  return field?.select?.name || "";
+}
+
+function getMultiSelect(field) {
+  return (field?.multi_select || []).map((t) => t.name);
+}
+
+function mapNotionPageToPayload(page) {
+  const props = page.properties;
+  return {
+    title: getPlainText(props["Title"]?.title),
+    "Raw Text": getPlainText(props["Raw Text"]?.rich_text),
+    Type: getSelectValue(props["Type"]),
+    Tags: getMultiSelect(props["Tags"]),
+    Confidence: getSelectValue(props["Confidence"]),
+    "Confidence Notes": getPlainText(props["Confidence Notes"]?.rich_text),
+    Source: getPlainText(props["Source"]?.rich_text),
+    Timestamp: page.created_time,
+  };
+}
+
+module.exports = {
+  fetchNewEntries,
+};

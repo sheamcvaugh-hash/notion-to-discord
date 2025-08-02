@@ -1,42 +1,40 @@
 const express = require("express");
+const bodyParser = require("body-parser");
 const axios = require("axios");
-require("dotenv").config();
 
 const app = express();
-app.use(express.json());
+const port = process.env.PORT || 3000;
 
-app.post("/notion-webhook", async (req, res) => {
-  const data = req.body;
-  const { title, content, type } = data;
+app.use(bodyParser.json());
 
-  console.log("Incoming payload:", JSON.stringify(data, null, 2));
+app.post("/", async (req, res) => {
+  const { title, content, type } = req.body;
 
-  const webhooks = [
-    process.env.DISCORD_WEBHOOK_PERSONAL,
-    process.env.DISCORD_WEBHOOK_GLOBAL
-  ];
+  console.log("Incoming payload:", { title, content, type });
+
+  const message = {
+    embeds: [
+      {
+        title: title || "Untitled",
+        description: content || "No content provided",
+        color: type === "personal" ? 0x3498db : 0x2ecc71, // blue vs green
+      },
+    ],
+  };
 
   try {
-    for (const webhook of webhooks) {
-      if (!webhook) {
-        console.error("Missing webhook URL in environment variables.");
-        continue;
-      }
-
-      const discordPayload = {
-        content: `**${title}**\n${content}\n\n_Type:_ ${type}`
-      };
-
-      const response = await axios.post(webhook, discordPayload);
-      console.log(`Posted to Discord: ${response.status}`);
+    if (type === "personal") {
+      await axios.post(process.env.DISCORD_WEBHOOK_PERSONAL, message);
+    } else {
+      await axios.post(process.env.DISCORD_WEBHOOK_GLOBAL, message);
     }
-
-    res.status(200).send("Posted to both Discord channels.");
-  } catch (err) {
-    console.error("Error posting to Discord:", err.response?.data || err.message);
-    res.status(500).send("Failed to post to Discord.");
+    res.status(200).send("Message sent to Discord");
+  } catch (error) {
+    console.error("Error posting to Discord:", error.response?.data || error.message);
+    res.status(500).send("Failed to post to Discord");
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+});

@@ -77,7 +77,7 @@ setInterval(async () => {
 
 // Keepalive route to prevent autosuspend
 app.get("/keepalive", (req, res) => {
-  res.status(200).send("OK");
+  res.status(200).send("👋 I'm alive");
 });
 
 app.listen(port, () => {

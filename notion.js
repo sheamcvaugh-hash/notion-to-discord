@@ -3,12 +3,15 @@ const axios = require("axios");
 const NOTION_SECRET = process.env.NOTION_SECRET;
 const DATABASE_ID = process.env.NOTION_DATABASE_ID;
 
+// DEBUG: Log first 6 characters of secret to verify it's injected
+console.log("NOTION_SECRET starts with:", NOTION_SECRET?.slice(0, 6));
+
 let lastChecked = new Date().toISOString();
 
 async function fetchNewEntries() {
   try {
     const response = await axios.post(
-      "https://api.notion.com/v1/databases/" + DATABASE_ID + "/query",
+      `https://api.notion.com/v1/databases/${DATABASE_ID}/query`,
       {
         filter: {
           timestamp: "created_time",
@@ -39,7 +42,10 @@ async function fetchNewEntries() {
 
     return results.map((page) => mapNotionPageToPayload(page));
   } catch (error) {
-    console.error("Failed to fetch Notion entries:", error.message);
+    console.error("❌ Failed to fetch Notion entries:", error.message);
+    if (error.response) {
+      console.error("Response data:", JSON.stringify(error.response.data));
+    }
     return [];
   }
 }

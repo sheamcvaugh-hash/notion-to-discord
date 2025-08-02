@@ -80,6 +80,7 @@ app.get("/keepalive", (req, res) => {
   res.status(200).send("👋 I'm alive");
 });
 
-app.listen(port, () => {
+// ✅ CRITICAL: Listen on 0.0.0.0 so Fly can reach the app
+app.listen(port, "0.0.0.0", () => {
   console.log(`Server running on port ${port}`);
 });

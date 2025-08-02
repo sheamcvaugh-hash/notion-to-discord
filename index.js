@@ -6,6 +6,8 @@ const { fetchNewEntries } = require("./notion");
 const app = express();
 const port = process.env.PORT || 3000;
 
+let hasRunOnce = false;
+
 app.use(bodyParser.json());
 
 function buildMessage(entry) {
@@ -47,6 +49,10 @@ ${rawText || "No raw input provided."}`;
   return { content: messageContent };
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // Optional: still allow manual POST
 app.post("/", async (req, res) => {
   const messagePayload = buildMessage(req.body);
@@ -71,13 +77,19 @@ setInterval(async () => {
   console.log("🔁 Checking Notion for new entries...");
   const newEntries = await fetchNewEntries();
 
+  if (!hasRunOnce) {
+    console.log("⏭️ First run — skipping Discord sends");
+    hasRunOnce = true;
+    return;
+  }
+
   for (const entry of newEntries) {
     const messagePayload = buildMessage(entry);
     try {
-      await Promise.all([
-        axios.post(process.env.DISCORD_WEBHOOK_GLOBAL, messagePayload),
-        axios.post(process.env.DISCORD_WEBHOOK_PERSONAL, messagePayload),
-      ]);
+      await axios.post(process.env.DISCORD_WEBHOOK_GLOBAL, messagePayload);
+      await sleep(300); // Rate limit buffer
+      await axios.post(process.env.DISCORD_WEBHOOK_PERSONAL, messagePayload);
+      await sleep(300); // Additional buffer
       console.log("✅ Sent new entry to Discord");
     } catch (err) {
       console.error("❌ Error sending to Discord:", err.message);

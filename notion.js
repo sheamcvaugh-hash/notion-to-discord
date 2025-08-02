@@ -40,7 +40,7 @@ async function fetchNewEntries() {
       lastChecked = new Date().toISOString(); // advance cursor
     }
 
-    return results.map((page) => mapNotionPageToPayload(page));
+    return results.map(mapNotionPageToPayload);
   } catch (error) {
     console.error("❌ Failed to fetch Notion entries:", error.message);
     if (error.response) {
@@ -49,6 +49,8 @@ async function fetchNewEntries() {
     return [];
   }
 }
+
+// ----------- Field Extractors -----------
 
 function getPlainText(richTextArray) {
   if (!Array.isArray(richTextArray)) return "";
@@ -63,17 +65,24 @@ function getMultiSelect(field) {
   return (field?.multi_select || []).map((t) => t.name);
 }
 
+function getDate(field) {
+  return field?.date?.start || null;
+}
+
+// ----------- Mapper -----------
+
 function mapNotionPageToPayload(page) {
   const props = page.properties;
+
   return {
-    title: getPlainText(props["Title"]?.title),
-    "Raw Text": getPlainText(props["Raw Text"]?.rich_text),
+    title: getPlainText(props["Core Brain Database"]?.title),
+    rawText: getPlainText(props["Raw Input"]?.rich_text),
     Type: getSelectValue(props["Type"]),
     Tags: getMultiSelect(props["Tags"]),
     Confidence: getSelectValue(props["Confidence"]),
-    "Confidence Notes": getPlainText(props["Confidence Notes"]?.rich_text),
-    Source: getPlainText(props["Source"]?.rich_text),
-    Timestamp: page.created_time,
+    confidenceNotes: getPlainText(props["Confidence Notes"]?.rich_text),
+    Source: getSelectValue(props["Source"]),
+    Timestamp: getDate(props["Timestamp"]) || page.created_time,
   };
 }
 

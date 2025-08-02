@@ -8,12 +8,6 @@ const port = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
-// ✅ Keepalive route for cron job ping
-app.get("/keepalive", (req, res) => {
-  res.status(200).send("👋 I'm alive");
-});
-
-// 📥 Webhook route to receive and dispatch Notion entries to Discord
 app.post("/", async (req, res) => {
   const {
     title,
@@ -27,30 +21,66 @@ app.post("/", async (req, res) => {
   } = req.body;
 
   const formattedTags = Array.isArray(Tags)
-    ? Tags.map((tag) => `#${tag}`).join(" ")
+    ? Tags.map((tag) => #${tag}).join(" ")
     : "";
 
-  let messageContent = `🧠 **New Digital Brain Entry Logged**
+  let messageContent = 🧠 **New Digital Brain Entry Logged**
 
 **📝 Title:** ${title || "Untitled"}
 
 **🗂 Type:** ${Type || "Uncategorized"}  
 **🏷 Tags:** ${formattedTags}  
-**📈 Confidence:** ${Confidence || "Unknown"}`;
+**📈 Confidence:** ${Confidence || "Unknown"};
 
   if (confidenceNotes) {
-    messageContent += `  
-**🧾 Confidence Notes:** ${confidenceNotes}`;
+    messageContent +=   
+**🧾 Confidence Notes:** ${confidenceNotes};
   }
 
-  messageContent += `  
+  messageContent +=   
 **📤 Source:** ${Source || "Unknown"}  
 **🕒 Timestamp:** ${Timestamp || "No timestamp"}
 
 **🧾 Raw Input:**  
-${rawText || "No raw input provided."}`;
+${rawText || "No raw input provided."};
 
   const messagePayload = { content: messageContent };
 
   try {
-    await Promise.a
+    await Promise.all([
+      axios.post(process.env.DISCORD_WEBHOOK_GLOBAL, messagePayload),
+      axios.post(process.env.DISCORD_WEBHOOK_PERSONAL, messagePayload),
+    ]);
+    res.status(200).send("Message sent to both Discord channels");
+  } catch (error) {
+    console.error(
+      "Error posting to Discord:",
+      error.response?.data || error.message
+    );
+    res.status(500).send("Failed to post to Discord");
+  }
+});
+
+// ✅ THIS is what actually checks Notion every 60s
+setInterval(async () => {
+  console.log("🔁 Checking Notion for new entries...");
+  const newEntries = await fetchNewEntries();
+
+  for (const entry of newEntries) {
+    try {
+      await axios.post(http://localhost:${port}/, entry);
+      console.log("✅ Dispatched new entry to internal POST /");
+    } catch (err) {
+      console.error("❌ Error sending to internal route:", err.message);
+    }
+  }
+}, 60000);
+
+// Keepalive route
+app.get("/keepalive", (req, res) => {
+  res.status(200).send("👋 I'm alive");
+});
+
+app.listen(port, () => {
+  console.log(✅ Server running on port ${port});
+});

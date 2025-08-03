@@ -6,7 +6,6 @@ const { fetchNewEntries } = require("./notion");
 
 const app = express();
 const port = process.env.PORT || 3000;
-let hasRunOnce = false;
 
 app.use(bodyParser.json());
 
@@ -149,15 +148,18 @@ setInterval(async () => {
       return;
     }
 
+    const now = new Date();
+    const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
+
+    const recentEntries = newEntries.filter((entry) => {
+      const ts = new Date(entry.Timestamp);
+      return ts >= fiveMinutesAgo;
+    });
+
     console.log(`📥 Found ${newEntries.length} new entr${newEntries.length === 1 ? "y" : "ies"}`);
+    console.log(`📤 ${recentEntries.length} entr${recentEntries.length === 1 ? "y" : "ies"} will be sent to Discord`);
 
-    if (!hasRunOnce) {
-      console.log("⏭️ First run — skipping Discord sends");
-      hasRunOnce = true;
-      return;
-    }
-
-    for (const entry of newEntries) {
+    for (const entry of recentEntries) {
       const messagePayload = buildMessage(entry);
 
       try {

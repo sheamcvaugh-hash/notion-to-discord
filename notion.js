@@ -40,9 +40,11 @@ async function fetchNewEntries() {
     const title = titleProp?.title?.[0]?.plain_text?.trim() || "Untitled";
     const rawText = rawInputProp?.rich_text?.[0]?.plain_text?.trim() || "";
     const type = props.Type?.select?.name || null;
+
     const tags = Array.isArray(props.Tags?.multi_select)
-      ? props.Tags.map(tag => tag.name)
+      ? props.Tags.multi_select.map(tag => tag.name)
       : [];
+
     const confidence = props.Confidence?.select?.name || null;
     const confidenceNotes = props.confidenceNotes?.rich_text?.[0]?.plain_text?.trim() || "";
     const source = props.Source?.select?.name || null;

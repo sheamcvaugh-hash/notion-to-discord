@@ -16,7 +16,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE
 );
 
-// 🧠 Build Discord message from Notion poll
+// 🧠 Format Discord message
 function buildMessage(entry) {
   const {
     title,
@@ -36,7 +36,6 @@ function buildMessage(entry) {
   let messageContent = `🧠 **New Digital Brain Entry Logged**
 
 **📝 Title:** ${title || "Untitled"}
-
 **🗂 Type:** ${Type || "Uncategorized"}  
 **🏷 Tags:** ${formattedTags}  
 **📈 Confidence:** ${Confidence || "Unknown"}`;
@@ -60,7 +59,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// ✅ Manual POST for Discord
+// ✅ Manual POST test
 app.post("/", async (req, res) => {
   const messagePayload = buildMessage(req.body);
 
@@ -69,14 +68,14 @@ app.post("/", async (req, res) => {
       axios.post(process.env.DISCORD_WEBHOOK_GLOBAL, messagePayload),
       axios.post(process.env.DISCORD_WEBHOOK_PERSONAL, messagePayload),
     ]);
-    res.status(200).send("Message sent to both Discord channels");
+    res.status(200).send("✅ Message sent to both Discord channels");
   } catch (error) {
-    console.error("Error posting to Discord:", error.response?.data || error.message);
+    console.error("❌ Error posting to Discord:", error.response?.data || error.message);
     res.status(500).send("Failed to post to Discord");
   }
 });
 
-// ✅ Supabase bridge for Agent 20
+// ✅ Agent 20 input (from other apps)
 app.post("/agent20", async (req, res) => {
   const { raw_text, source, tags, metadata } = req.body;
 
@@ -129,9 +128,7 @@ app.post("/agent20", async (req, res) => {
       },
     ]);
 
-    if (supabaseError) {
-      throw supabaseError;
-    }
+    if (supabaseError) throw supabaseError;
 
     res.status(200).json({ message: "✅ Data inserted into Supabase", summary });
   } catch (err) {
@@ -140,28 +137,41 @@ app.post("/agent20", async (req, res) => {
   }
 });
 
-// ♻️ Poll Notion and send entries to Discord
+// ♻️ Notion → Discord poll loop
 setInterval(async () => {
   console.log("🔁 Checking Notion for new entries...");
-  const newEntries = await fetchNewEntries();
 
-  if (!hasRunOnce) {
-    console.log("⏭️ First run — skipping Discord sends");
-    hasRunOnce = true;
-    return;
-  }
+  try {
+    const newEntries = await fetchNewEntries();
 
-  for (const entry of newEntries) {
-    const messagePayload = buildMessage(entry);
-    try {
-      await axios.post(process.env.DISCORD_WEBHOOK_GLOBAL, messagePayload);
-      await sleep(300);
-      await axios.post(process.env.DISCORD_WEBHOOK_PERSONAL, messagePayload);
-      await sleep(300);
-      console.log("✅ Sent new entry to Discord");
-    } catch (err) {
-      console.error("❌ Error sending to Discord:", err.message);
+    if (!newEntries || !Array.isArray(newEntries)) {
+      console.error("❌ fetchNewEntries() returned invalid response:", newEntries);
+      return;
     }
+
+    console.log(`📥 Found ${newEntries.length} new entr${newEntries.length === 1 ? "y" : "ies"}`);
+
+    if (!hasRunOnce) {
+      console.log("⏭️ First run — skipping Discord sends");
+      hasRunOnce = true;
+      return;
+    }
+
+    for (const entry of newEntries) {
+      const messagePayload = buildMessage(entry);
+
+      try {
+        await axios.post(process.env.DISCORD_WEBHOOK_GLOBAL, messagePayload);
+        await sleep(300);
+        await axios.post(process.env.DISCORD_WEBHOOK_PERSONAL, messagePayload);
+        await sleep(300);
+        console.log(`✅ Sent to Discord: ${entry.title || "[Untitled]"}`);
+      } catch (err) {
+        console.error("❌ Discord send error:", err.response?.data || err.message);
+      }
+    }
+  } catch (err) {
+    console.error("❌ Notion polling failed:", err.message);
   }
 }, 60000);
 

@@ -83,10 +83,17 @@ app.post("/agent20", async (req, res) => {
     metadata,
     confidence,
     confidenceNotes,
+    message,
   } = req.body;
 
+  // If raw_text or source are missing, treat as alert-only message
   if (!raw_text || !source) {
-    return res.status(400).json({ error: "Missing required fields: raw_text, source" });
+    if (message) {
+      console.log("📡 Received alert-only payload. Skipping Supabase insert.");
+      return res.status(200).json({ message: "✅ Alert message received. No DB insert." });
+    } else {
+      return res.status(400).json({ error: "Missing required fields: raw_text, source" });
+    }
   }
 
   let summary = null;

@@ -139,7 +139,7 @@ app.post("/agent20", async (req, res) => {
         tags,
         metadata,
         confidence: confidence || null,
-        confidence_notes: confidenceNotes || null,
+        confidenceNotes: confidenceNotes || null,
       },
     ]);
 
@@ -151,7 +151,6 @@ app.post("/agent20", async (req, res) => {
     res.status(500).json({ error: "Failed to insert into Supabase" });
   }
 });
-
 
 // ——— NOTION → DISCORD POLLING ——— //
 setInterval(async () => {

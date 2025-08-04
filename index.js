@@ -1,3 +1,4 @@
+// ——— DEPENDENCIES & SETUP ——— //
 const express = require("express");
 const bodyParser = require("body-parser");
 const axios = require("axios");
@@ -9,13 +10,12 @@ const port = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
-// Supabase client
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE
 );
 
-// 🧠 Format Discord message
+// ——— UTILITY FUNCTIONS ——— //
 function buildMessage(entry) {
   const {
     title,
@@ -58,7 +58,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// ✅ Manual POST test
+// ——— MANUAL POST TEST ROUTE ——— //
 app.post("/", async (req, res) => {
   const messagePayload = buildMessage(req.body);
 
@@ -74,9 +74,16 @@ app.post("/", async (req, res) => {
   }
 });
 
-// ✅ Agent 20 input (from other apps)
+// ——— AGENT 20 POST ENDPOINT ——— //
 app.post("/agent20", async (req, res) => {
-  const { raw_text, source, tags, metadata } = req.body;
+  const {
+    raw_text,
+    source,
+    tags,
+    metadata,
+    confidence,
+    confidenceNotes,
+  } = req.body;
 
   if (!raw_text || !source) {
     return res.status(400).json({ error: "Missing required fields: raw_text, source" });
@@ -124,6 +131,8 @@ app.post("/agent20", async (req, res) => {
         summary,
         tags,
         metadata,
+        Confidence: confidence || null,
+        confidenceNotes: confidenceNotes || null,
       },
     ]);
 
@@ -136,7 +145,7 @@ app.post("/agent20", async (req, res) => {
   }
 });
 
-// ♻️ Notion → Discord poll loop
+// ——— NOTION → DISCORD POLLING ——— //
 setInterval(async () => {
   console.log("🔁 Checking Notion for new entries...");
 
@@ -177,11 +186,12 @@ setInterval(async () => {
   }
 }, 60000);
 
-// 👋 Healthcheck
+// ——— HEALTHCHECK ENDPOINT ——— //
 app.get("/keepalive", (req, res) => {
   res.status(200).send("👋 I'm alive");
 });
 
+// ——— START SERVER ——— //
 app.listen(port, () => {
   console.log(`✅ Server running on port ${port}`);
 });

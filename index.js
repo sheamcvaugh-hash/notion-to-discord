@@ -77,80 +77,46 @@ app.post("/", async (req, res) => {
 // ——— AGENT 20 POST ENDPOINT ——— //
 app.post("/agent20", async (req, res) => {
   const {
-    raw_text,
-    source,
-    tags,
-    metadata,
-    confidence,
-    confidenceNotes,
+    brain,
+    type,
+    summary,
     message,
+    tags,
+    source,
+    raw_text,
+    metadata,
+    route
   } = req.body;
 
-  // If raw_text or source are missing, treat as alert-only message
-  if (!raw_text || !source) {
-    if (message) {
-      console.log("📡 Received alert-only payload. Skipping Supabase insert.");
-      return res.status(200).json({ message: "✅ Alert message received. No DB insert." });
-    } else {
-      return res.status(400).json({ error: "Missing required fields: raw_text, source" });
+  // Construct fallback message if one wasn't provided
+  const msgContent = message || `🧠 New entry logged in ${brain || 'Digital Brain'}\n\n**Type:** ${type || 'Uncategorized'}\n**Summary:** ${summary || 'No summary provided'}`;
+
+  const payload = {
+    content: msgContent,
+  };
+
+  // Always send to logs-global; optionally add route-based targets
+  const webhookTargets = [process.env.DISCORD_WEBHOOK_GLOBAL];
+
+  if (Array.isArray(route)) {
+    for (const target of route) {
+      const envKey = `DISCORD_WEBHOOK_${target.toUpperCase()}`;
+      const url = process.env[envKey];
+      if (url && !webhookTargets.includes(url)) webhookTargets.push(url);
     }
   }
 
-  let summary = null;
-
   try {
-    const openaiRes = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        model: "gpt-4",
-        messages: [
-          {
-            role: "system",
-            content: "You are a thoughtful assistant. Summarize the user's input into a concise, helpful log entry.",
-          },
-          {
-            role: "user",
-            content: raw_text,
-          },
-        ],
-        max_tokens: 150,
-        temperature: 0.7,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-      }
+    await Promise.all(
+      webhookTargets.map((url) => axios.post(url, payload))
     );
-
-    summary = openaiRes.data.choices[0].message.content.trim();
-  } catch (error) {
-    console.warn("⚠️ Failed to summarize with OpenAI:", error.message);
-  }
-
-  try {
-    const { error: supabaseError } = await supabase.from("agent20_queue").insert([
-      {
-        raw_text,
-        source,
-        status: "Pending",
-        summary,
-        tags,
-        metadata,
-        confidence: confidence || null,
-        confidenceNotes: confidenceNotes || null,
-      },
-    ]);
-
-    if (supabaseError) throw supabaseError;
-
-    res.status(200).json({ message: "✅ Data inserted into Supabase", summary });
+    res.status(200).json({ message: "✅ Discord notification sent" });
   } catch (err) {
-    console.error("❌ Supabase insert error:", err.message);
-    res.status(500).json({ error: "Failed to insert into Supabase" });
+    console.error("❌ Discord relay error:", err.message);
+    res.status(500).json({ error: "Failed to send to Discord" });
   }
 });
+
 
 // ——— NOTION → DISCORD POLLING ——— //
 setInterval(async () => {

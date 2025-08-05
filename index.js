@@ -13,7 +13,7 @@ app.use(bodyParser.json());
 // ====== SUPABASE CLIENT INITIALIZATION ====== //
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY // <- THIS IS THE FLY SECRET, NOT THE SERVICE ROLE
+  process.env.SUPABASE_KEY // Must match the secret in Fly!
 );
 
 // ——— UTILITY FUNCTIONS ——— //

@@ -10,9 +10,10 @@ const port = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
+// ====== SUPABASE CLIENT INITIALIZATION ====== //
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE
+  process.env.SUPABASE_KEY // <- THIS IS THE FLY SECRET, NOT THE SERVICE ROLE
 );
 
 // ——— UTILITY FUNCTIONS ——— //

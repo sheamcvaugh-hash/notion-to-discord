@@ -5,10 +5,9 @@ const axios = require("axios");
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Built-in JSON parsing (no body-parser needed)
 app.use(express.json({ limit: "1mb" }));
 
-// ——— ENV GUARD ——— //
+// ——— ENV ——— //
 const {
   DISCORD_WEBHOOK_GLOBAL,
   DISCORD_WEBHOOK_PERSONAL,
@@ -26,43 +25,51 @@ function requireEnv(name) {
 requireEnv("SUPABASE_URL");
 requireEnv("SUPABASE_SERVICE_ROLE_KEY");
 
+// ——— AUTH ——— //
+function authOk(req) {
+  // Expect: Authorization: Bearer <RELAY_TOKEN>
+  if (!RELAY_TOKEN) return true; // allow if not set (useful for local/dev)
+  const header = req.headers.authorization || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+  return token && token === RELAY_TOKEN;
+}
+
 // ——— HELPERS ——— //
 function buildMessage(entry) {
   // Pass through as-is, nicely formatted for Discord
   return { content: JSON.stringify(entry, null, 2) };
 }
 
-function authOk(req) {
-  // Expect: Authorization: Bearer <RELAY_TOKEN>
-  if (!RELAY_TOKEN) return true; // if no token set, allow (useful for local dev)
-  const header = req.headers.authorization || "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
-  return token && token === RELAY_TOKEN;
+function sanitizeString(s) {
+  return typeof s === "string" ? s.trim() : "";
 }
 
-// Normalize incoming ChatGPT payloads into our brain_queue shape
-function mapToBrainQueue(body) {
-  // Accept a few common shapes:
-  // { raw_text, destination, source, metadata }
-  // { text, destination, source, metadata }
-  // { message: "...", ... }
+// Normalize incoming payloads into our brain_queue shape
+function mapToBrainQueue(body, metaFrom = null) {
   const raw_text =
-    body.raw_text ??
-    body.text ??
-    body.message ??
-    (typeof body === "string" ? body : "");
+    sanitizeString(body.raw_text) ||
+    sanitizeString(body.text) ||
+    sanitizeString(body.message) ||
+    (typeof body === "string" ? sanitizeString(body) : "");
 
-  const destination = body.destination || "digital_brain"; // default
-  const source = body.source || "ChatGPT";
-  const metadata = body.metadata || {};
+  const destination = sanitizeString(body.destination) || "digital_brain";
+  const source = sanitizeString(body.source) || "ChatGPT";
+  const metadataBase =
+    typeof body.metadata === "object" && body.metadata !== null ? body.metadata : {};
 
-  if (!raw_text || typeof raw_text !== "string") {
-    const err = new Error("Invalid payload: missing string field `raw_text` (or `text`/`message`).");
+  if (!raw_text) {
+    const err = new Error(
+      "Invalid payload: missing string field `raw_text` (or `text`/`message`)."
+    );
     err.status = 400;
     throw err;
   }
 
-  // Supabase columns: raw_text (text), source (text/enum), status (enum), destination (text), metadata (jsonb)
+  const metadata = {
+    ...metadataBase,
+    ...(metaFrom ? { from: metaFrom } : {}),
+  };
+
   return {
     raw_text,
     source,
@@ -82,8 +89,43 @@ async function insertBrainQueueRow(row) {
     Prefer: "return=representation",
   };
   const { data } = await axios.post(url, [row], { headers });
-  // data is an array with the inserted row(s)
   return data?.[0];
+}
+
+// ——— COMMAND PARSER ——— //
+const COMMAND_MAP = {
+  "/save": "digital_brain",
+  "/savepersonal": "deep_personal",
+  "/savewayfinder": "deep_wayfinder",
+  "/savemegaclicks": "deep_megaclicks",
+  "/savesystem": "deep_system",
+};
+
+function parseSlashCommand(input) {
+  const text = sanitizeString(input);
+  if (!text.startsWith("/")) {
+    return null;
+  }
+
+  // Split on whitespace; first token is the command
+  const firstSpace = text.indexOf(" ");
+  const cmd = (firstSpace === -1 ? text : text.slice(0, firstSpace)).toLowerCase();
+  const rest = sanitizeString(firstSpace === -1 ? "" : text.slice(firstSpace + 1));
+
+  if (!COMMAND_MAP[cmd]) {
+    return null;
+  }
+  if (!rest) {
+    const err = new Error(`Command '${cmd}' requires text to save after the command.`);
+    err.status = 400;
+    throw err;
+  }
+
+  return {
+    command: cmd,
+    destination: COMMAND_MAP[cmd],
+    raw_text: rest,
+  };
 }
 
 // ——— EXISTING: MANUAL POST TEST ROUTE (Discord) ——— //
@@ -105,7 +147,7 @@ app.post("/", async (req, res) => {
   }
 });
 
-// ——— NEW: CHATGPT → BRAIN QUEUE INGEST ——— //
+// ——— CHATGPT → BRAIN QUEUE (JSON payload) ——— //
 app.post("/brain-queue", async (req, res) => {
   try {
     if (!authOk(req)) {
@@ -115,13 +157,11 @@ app.post("/brain-queue", async (req, res) => {
     const row = mapToBrainQueue(req.body);
     const inserted = await insertBrainQueueRow(row);
 
-    // Optional: fan-out to Discord for visibility
     try {
       const messagePayload = buildMessage({ route: "brain-queue", inserted });
       if (DISCORD_WEBHOOK_GLOBAL) await axios.post(DISCORD_WEBHOOK_GLOBAL, messagePayload);
       if (DISCORD_WEBHOOK_PERSONAL) await axios.post(DISCORD_WEBHOOK_PERSONAL, messagePayload);
     } catch (e) {
-      // Non-fatal; keep ingest success
       console.warn("⚠️ Discord fan-out failed:", e.response?.data || e.message);
     }
 
@@ -130,6 +170,62 @@ app.post("/brain-queue", async (req, res) => {
     const status = err.status || 500;
     console.error("❌ Ingest error:", err.response?.data || err.message);
     res.status(status).json({ ok: false, error: err.message || "Ingest failed" });
+  }
+});
+
+// ——— NEW: SLASH COMMAND INGEST ——— //
+// Accepts either:
+// { "command": "/save your text..." }   OR
+// { "message": "/save your text..." }   OR
+// raw string body "/save your text..." (if client sends text/plain + express.json won't parse)
+// We expect JSON, but we handle both shapes above.
+app.post("/command", async (req, res) => {
+  try {
+    if (!authOk(req)) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const body = req.body;
+    const raw =
+      (typeof body === "string" ? body : "") ||
+      sanitizeString(body?.command) ||
+      sanitizeString(body?.message) ||
+      "";
+
+    const parsed = parseSlashCommand(raw);
+    if (!parsed) {
+      return res.status(400).json({
+        ok: false,
+        error:
+          "Invalid command. Use one of: /save, /savepersonal, /savewayfinder, /savemegaclicks, /savesystem followed by your text.",
+      });
+    }
+
+    const row = mapToBrainQueue(
+      {
+        raw_text: parsed.raw_text,
+        destination: parsed.destination,
+        source: "ChatGPT",
+        metadata: {},
+      },
+      parsed.command // meta.from
+    );
+
+    const inserted = await insertBrainQueueRow(row);
+
+    try {
+      const messagePayload = buildMessage({ route: "command", command: parsed.command, inserted });
+      if (DISCORD_WEBHOOK_GLOBAL) await axios.post(DISCORD_WEBHOOK_GLOBAL, messagePayload);
+      if (DISCORD_WEBHOOK_PERSONAL) await axios.post(DISCORD_WEBHOOK_PERSONAL, messagePayload);
+    } catch (e) {
+      console.warn("⚠️ Discord fan-out failed:", e.response?.data || e.message);
+    }
+
+    res.status(201).json({ ok: true, id: inserted?.id, inserted });
+  } catch (err) {
+    const status = err.status || 500;
+    console.error("❌ Command ingest error:", err.response?.data || err.message);
+    res.status(status).json({ ok: false, error: err.message || "Command ingest failed" });
   }
 });
 

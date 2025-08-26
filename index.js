@@ -229,6 +229,76 @@ app.post("/command", async (req, res) => {
   }
 });
 
+// ——— BRAIN READ API ——— //
+
+import { queryDigitalBrain, queryDeepBrain, synthesizeBrainData } from './core-logic.js';
+
+// Optional: simple bearer check for read calls
+function requireReadKey(req, res, next) {
+  const key = process.env.READ_API_KEY;
+  if (!key) return next(); // no key set → open (dev)
+  const auth = req.headers.authorization || '';
+  if (auth === `Bearer ${key}`) return next();
+  return res.status(401).json({ error: 'Unauthorized' });
+}
+
+app.use('/brain', requireReadKey);
+
+// GET /brain/digital?type=Preference,Goal&tags=travel,protein&confidence=High,Medium&source=ChatGPT&limit=10
+app.get('/brain/digital', async (req, res) => {
+  try {
+    const parseList = (q) => (q ? String(q).split(',').map(s => s.trim()).filter(Boolean) : undefined);
+    const criteria = {
+      type: parseList(req.query.type),
+      tags: parseList(req.query.tags),
+      confidence: parseList(req.query.confidence),
+      source: parseList(req.query.source),
+    };
+    const limit = Math.min(parseInt(req.query.limit || '10', 10), 100);
+    const data = await queryDigitalBrain(criteria, limit);
+    res.json({ ok: true, count: data.length, data });
+  } catch (e) {
+    console.error('GET /brain/digital error:', e);
+    res.status(500).json({ ok: false, error: 'Internal error' });
+  }
+});
+
+// GET /brain/deep/:table?type=Journal,Systems&tags=Obsidian,planning&confidence=High&limit=10
+app.get('/brain/deep/:table', async (req, res) => {
+  try {
+    const table = String(req.params.table || '');
+    const parseList = (q) => (q ? String(q).split(',').map(s => s.trim()).filter(Boolean) : undefined);
+    const criteria = {
+      type: parseList(req.query.type),
+      tags: parseList(req.query.tags),
+      confidence: parseList(req.query.confidence),
+    };
+    const limit = Math.min(parseInt(req.query.limit || '10', 10), 100);
+    const data = await queryDeepBrain(table, criteria, limit);
+    res.json({ ok: true, table, count: data.length, data });
+  } catch (e) {
+    console.error('GET /brain/deep error:', e);
+    res.status(500).json({ ok: false, error: 'Internal error' });
+  }
+});
+
+// POST /brain/synthesize  { entries: [...], prompt?: "optional guidance" }
+app.post('/brain/synthesize', async (req, res) => {
+  try {
+    const entries = Array.isArray(req.body?.entries) ? req.body.entries : [];
+    const prompt = String(req.body?.prompt || '');
+    const summary = await synthesizeBrainData(entries, prompt);
+    res.json({ ok: true, summary });
+  } catch (e) {
+    console.error('POST /brain/synthesize error:', e);
+    res.status(500).json({ ok: false, error: 'Internal error' });
+  }
+});
+
+// ——— END BRAIN READ API ——— //
+
+
+
 // ——— HEALTHCHECK ENDPOINT ——— //
 app.get("/keepalive", (_req, res) => {
   res.status(200).send("👋 I'm alive");

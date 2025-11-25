@@ -19,7 +19,8 @@ const {
   GHL_API_KEY, // GoHighLevel Location API key (v1)
   GHL_LOCATION_ID, // optional, kept for reference
   SUBSTACK_WEBHOOK_TOKEN, // shared secret for Substack webhooks (?token=...)
-  AGENT_20_URL,          // ←←← ADDED: our own public URL
+  AGENT_20_URL,          // our own public URL
+  GITHUB_PERSONAL_ACCESS_TOKEN, // fine-grained PAT, read-only
 } = process.env;
 
 function requireEnv(name) {
@@ -207,6 +208,37 @@ function parseSlashCommand(input) {
   };
 }
 
+// ——— GITHUB HELPERS ——— //
+function requireGithubToken() {
+  if (!GITHUB_PERSONAL_ACCESS_TOKEN) {
+    const err = new Error(
+      "Missing GITHUB_PERSONAL_ACCESS_TOKEN env var; GitHub proxy routes are disabled."
+    );
+    err.status = 500;
+    throw err;
+  }
+}
+
+async function githubRequest(method, url, params = {}, data = null) {
+  requireGithubToken();
+  const headers = {
+    Authorization: `Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}`,
+    Accept: "application/vnd.github+json",
+    "User-Agent": "agent20-fly-relay",
+  };
+
+  const config = {
+    method,
+    url,
+    headers,
+    params,
+    data,
+  };
+
+  const response = await axios(config);
+  return response.data;
+}
+
 // ——— AGENT 20 WRITE ENDPOINT (this is where the real brain will live later) ——— //
 app.post("/agent20-write", async (req, res) => {
   if (RELAY_TOKEN && !authOk(req)) {
@@ -371,6 +403,110 @@ app.post("/substack-subscriber", async (req, res) => {
     const status = err.status || 500;
     console.error("Substack → GHL sync error:", err.response?.data || err.message);
     res.status(status).json({ ok: false, error: err.message || "Sync failed" });
+  }
+});
+
+// ——— GITHUB PROXY ROUTES ——— //
+
+// List repos visible to the token (for sanity / discovery)
+app.get("/github/repos", async (req, res) => {
+  try {
+    if (!authOk(req)) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const params = {
+      per_page: Math.min(parseInt(req.query.per_page, 10) || 50, 100),
+      page: parseInt(req.query.page, 10) || 1,
+      sort: "updated",
+      direction: "desc",
+    };
+
+    const data = await githubRequest("GET", "https://api.github.com/user/repos", params);
+    // Trim to fields an LLM actually needs
+    const repos = data.map((r) => ({
+      id: r.id,
+      name: r.name,
+      full_name: r.full_name,
+      private: r.private,
+      default_branch: r.default_branch,
+      html_url: r.html_url,
+      updated_at: r.updated_at,
+    }));
+
+    res.json({ ok: true, repos });
+  } catch (err) {
+    const status = err.status || err.response?.status || 500;
+    console.error("GitHub repos error:", err.response?.data || err.message);
+    res.status(status).json({ ok: false, error: err.message || "GitHub repos fetch failed" });
+  }
+});
+
+// Fetch a single file's contents from a repo
+app.get("/github/file", async (req, res) => {
+  try {
+    if (!authOk(req)) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const owner = sanitizeString(req.query.owner);
+    const repo = sanitizeString(req.query.repo);
+    const path = sanitizeString(req.query.path);
+    const ref = sanitizeString(req.query.ref) || undefined; // branch/commit/sha
+
+    if (!owner || !repo || !path) {
+      return res.status(400).json({
+        ok: false,
+        error: "Missing required query params: owner, repo, path",
+      });
+    }
+
+    const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(
+      path
+    )}`;
+
+    const data = await githubRequest("GET", url, ref ? { ref } : {});
+
+    if (Array.isArray(data)) {
+      // They requested a directory, not a file
+      const listing = data.map((item) => ({
+        name: item.name,
+        path: item.path,
+        type: item.type,
+        size: item.size,
+      }));
+      return res.json({ ok: true, directory: true, items: listing });
+    }
+
+    if (!data.content || data.encoding !== "base64") {
+      return res.json({
+        ok: true,
+        binary: true,
+        encoding: data.encoding,
+        size: data.size,
+        path: data.path,
+        sha: data.sha,
+      });
+    }
+
+    const buff = Buffer.from(data.content, "base64");
+    const text = buff.toString("utf8");
+
+    res.json({
+      ok: true,
+      owner,
+      repo,
+      path: data.path,
+      sha: data.sha,
+      size: data.size,
+      encoding: "utf8",
+      ref: ref || null,
+      content: text,
+    });
+  } catch (err) {
+    const status = err.status || err.response?.status || 500;
+    console.error("GitHub file error:", err.response?.data || err.message);
+    res.status(status).json({ ok: false, error: err.message || "GitHub file fetch failed" });
   }
 });
 

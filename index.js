@@ -544,7 +544,7 @@ app.post("/brain-read", async (req, res) => {
       },
     });
 
-    // Pass through whatever Agent 20 returns ({ ok, result, ... })
+    // Pass through whatever Agent 20 returns
     return res.status(200).json(data);
   } catch (err) {
     const status = err.response?.status || 500;
@@ -558,6 +558,7 @@ app.post("/brain-read", async (req, res) => {
     });
   }
 });
+
 
 
 

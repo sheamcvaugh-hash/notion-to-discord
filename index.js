@@ -510,6 +510,71 @@ app.get("/github/file", async (req, res) => {
   }
 });
 
+// ——— AGENT 20 READ PROXY ——— //
+app.post("/brain-read", async (req, res) => {
+  try {
+    const READ_API_KEY = process.env.READ_API_KEY || "";
+
+    // Simple API key guard (separate from RELAY_TOKEN)
+    if (!READ_API_KEY) {
+      return res.status(500).json({
+        ok: false,
+        error: "READ_API_KEY is not configured on the relay.",
+      });
+    }
+
+    const clientKey =
+      req.headers["x-read-api-key"] || req.headers["x-read-api-token"] || "";
+    if (!clientKey || clientKey !== READ_API_KEY) {
+      return res.status(401).json({
+        ok: false,
+        error: "Unauthorized: missing or invalid x-read-api-key.",
+      });
+    }
+
+    const body = req.body || {};
+    const { query } = body;
+
+    if (!query || typeof query !== "string") {
+      return res.status(400).json({
+        ok: false,
+        error: '"query" (string) is required',
+      });
+    }
+
+    if (!AGENT_20_URL) {
+      return res.status(500).json({
+        ok: false,
+        error: "AGENT_20_URL is not configured; cannot proxy brain read.",
+      });
+    }
+
+    const targetBase = AGENT_20_URL.replace(/\/+$/, "");
+    const url = `${targetBase}/brain-read`;
+
+    const { data } = await axios.post(url, body, {
+      headers: {
+        "Content-Type": "application/json",
+        "x-read-api-key": READ_API_KEY,
+      },
+    });
+
+    // Expect backend to already return { ok, ... }
+    return res.status(200).json(data);
+  } catch (err) {
+    const status = err.response?.status || 500;
+    console.error(
+      "Brain read proxy error:",
+      err.response?.data || err.message
+    );
+    return res.status(status).json({
+      ok: false,
+      error: err.message || "Brain read proxy failed",
+    });
+  }
+});
+
+
 // ——— HEALTHCHECK ENDPOINT ——— //
 app.get("/keepalive", (_req, res) => {
   res.status(200).send("I'm alive");

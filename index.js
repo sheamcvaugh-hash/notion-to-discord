@@ -513,7 +513,7 @@ app.get("/github/file", async (req, res) => {
 // ——— AGENT 20 READ PROXY ——— //
 app.post("/brain-read", async (req, res) => {
   try {
-    // Optional: reuse the same relay auth as other JSON endpoints
+    // Optional: reuse relay auth (same as /brain-queue, /command, etc.)
     if (RELAY_TOKEN && !authOk(req)) {
       return res.status(401).json({ ok: false, error: "Unauthorized" });
     }
@@ -558,6 +558,17 @@ app.post("/brain-read", async (req, res) => {
     });
   }
 });
+
+// ——— HEALTHCHECK ENDPOINT ——— //
+app.get("/keepalive", (_req, res) => {
+  res.status(200).send("I'm alive");
+});
+
+// ——— START SERVER ——— //
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+});
+
 
 
 

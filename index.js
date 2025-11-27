@@ -513,11 +513,6 @@ app.get("/github/file", async (req, res) => {
 // ——— AGENT 20 READ PROXY ——— //
 app.post("/brain-read", async (req, res) => {
   try {
-    // Optional: reuse relay auth (same as /brain-queue, /command, etc.)
-    if (RELAY_TOKEN && !authOk(req)) {
-      return res.status(401).json({ ok: false, error: "Unauthorized" });
-    }
-
     const body = req.body || {};
     const { query } = body;
 
@@ -531,7 +526,7 @@ app.post("/brain-read", async (req, res) => {
     if (!AGENT_20_URL) {
       return res.status(500).json({
         ok: false,
-        error: "AGENT_20_URL is not configured; cannot proxy brain read.",
+        error: "AGENT_20_URL is not configured; brain-read backend not wired yet.",
       });
     }
 
@@ -544,7 +539,6 @@ app.post("/brain-read", async (req, res) => {
       },
     });
 
-    // Pass through whatever Agent 20 returns
     return res.status(200).json(data);
   } catch (err) {
     const status = err.response?.status || 500;
@@ -558,6 +552,7 @@ app.post("/brain-read", async (req, res) => {
     });
   }
 });
+
 
 // ——— HEALTHCHECK ENDPOINT ——— //
 app.get("/keepalive", (_req, res) => {

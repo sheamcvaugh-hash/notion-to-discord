@@ -516,6 +516,12 @@ app.post("/brain-read", async (req, res) => {
     const body = req.body || {};
     const { query } = body;
 
+    console.log("[relay:/brain-read] incoming", {
+      queryType: typeof query,
+      hasBody: !!body,
+    });
+
+    // Basic validation
     if (!query || typeof query !== "string") {
       return res.status(400).json({
         ok: false,
@@ -524,14 +530,17 @@ app.post("/brain-read", async (req, res) => {
     }
 
     if (!AGENT_20_URL) {
+      console.error("[relay:/brain-read] Missing AGENT_20_URL env var");
       return res.status(500).json({
         ok: false,
-        error: "AGENT_20_URL is not configured; brain-read backend not wired yet.",
+        error: "AGENT_20_URL is not configured; cannot proxy brain read.",
       });
     }
 
     const targetBase = AGENT_20_URL.replace(/\/+$/, "");
     const url = `${targetBase}/brain-read`;
+
+    console.log("[relay:/brain-read] proxying to Agent20", { url });
 
     const { data } = await axios.post(url, body, {
       headers: {
@@ -539,11 +548,15 @@ app.post("/brain-read", async (req, res) => {
       },
     });
 
+    console.log("[relay:/brain-read] success", {
+      hasOk: typeof data?.ok !== "undefined",
+    });
+
     return res.status(200).json(data);
   } catch (err) {
     const status = err.response?.status || 500;
     console.error(
-      "Brain read proxy error:",
+      "[relay:/brain-read] error:",
       err.response?.data || err.message
     );
     return res.status(status).json({
@@ -552,6 +565,7 @@ app.post("/brain-read", async (req, res) => {
     });
   }
 });
+
 
 
 // ——— HEALTHCHECK ENDPOINT ——— //

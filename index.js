@@ -21,7 +21,9 @@ const {
   SUBSTACK_WEBHOOK_TOKEN, // shared secret for Substack webhooks (?token=...)
   AGENT_20_URL,          // our own public URL
   GITHUB_PERSONAL_ACCESS_TOKEN, // fine-grained PAT, read-only
+  READ_API_KEY, // shared secret for Agent 20 read requests
 } = process.env;
+
 
 function requireEnv(name) {
   if (!process.env[name]) {
@@ -512,7 +514,7 @@ app.get("/github/file", async (req, res) => {
 // ——— AGENT 20 READ PROXY ——— //
 app.post("/brain-read", async (req, res) => {
   try {
-    // Reuse relay auth (same as /brain-queue, /command, etc.)
+    // Optional: reuse relay auth (same as /brain-queue, /command, etc.)
     if (RELAY_TOKEN && !authOk(req)) {
       return res.status(401).json({ ok: false, error: "Unauthorized" });
     }
@@ -537,13 +539,11 @@ app.post("/brain-read", async (req, res) => {
     const targetBase = AGENT_20_URL.replace(/\/+$/, "");
     const url = `${targetBase}/brain-read`;
 
-    // Use the same READ_API_KEY that the Agent 20 server expects
-    const readApiKey = process.env.READ_API_KEY || "";
-
     const { data } = await axios.post(url, body, {
       headers: {
         "Content-Type": "application/json",
-        ...(readApiKey ? { "x-read-api-key": readApiKey } : {}),
+        // This is what the backend is complaining about right now
+        "x-read-api-key": READ_API_KEY || "",
       },
     });
 
@@ -553,12 +553,19 @@ app.post("/brain-read", async (req, res) => {
     const status = err.response?.status || 500;
     console.error("Brain read proxy error:", err.response?.data || err.message);
 
+    // Try to surface the backend error if it exists
+    const backendError =
+      err.response?.data?.error ||
+      err.response?.data?.message ||
+      err.message;
+
     return res.status(status).json({
       ok: false,
-      error: err.response?.data?.error || err.message || "Brain read proxy failed",
+      error: backendError || "Brain read proxy failed",
     });
   }
 });
+
 
 
 // ——— HEALTHCHECK ENDPOINT ——— //

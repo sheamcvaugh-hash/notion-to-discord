@@ -512,7 +512,7 @@ app.get("/github/file", async (req, res) => {
 // ——— AGENT 20 READ PROXY ——— //
 app.post("/brain-read", async (req, res) => {
   try {
-    // Optional: reuse relay auth (same as /brain-queue, /command, etc.)
+    // Same auth gate as /brain-queue and /command:
     if (RELAY_TOKEN && !authOk(req)) {
       return res.status(401).json({ ok: false, error: "Unauthorized" });
     }
@@ -537,11 +537,15 @@ app.post("/brain-read", async (req, res) => {
     const targetBase = AGENT_20_URL.replace(/\/+$/, "");
     const url = `${targetBase}/brain-read`;
 
-    const { data } = await axios.post(url, body, {
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
+    // IMPORTANT: forward the shared relay token so Agent20 accepts the call
+    const headers = {
+      "Content-Type": "application/json",
+    };
+    if (RELAY_TOKEN) {
+      headers["x-relay-token"] = RELAY_TOKEN;
+    }
+
+    const { data } = await axios.post(url, body, { headers });
 
     // Pass through whatever Agent 20 returns
     return res.status(200).json(data);
@@ -554,8 +558,6 @@ app.post("/brain-read", async (req, res) => {
     });
   }
 });
-
-
 
 
 

@@ -509,7 +509,6 @@ app.get("/github/file", async (req, res) => {
     res.status(status).json({ ok: false, error: err.message || "GitHub file fetch failed" });
   }
 });
-
 // ——— AGENT 20 READ PROXY ——— //
 app.post("/brain-read", async (req, res) => {
   try {
@@ -544,19 +543,18 @@ app.post("/brain-read", async (req, res) => {
       },
     });
 
+    // Pass through whatever Agent 20 returns
     return res.status(200).json(data);
   } catch (err) {
     const status = err.response?.status || 500;
-    console.error(
-      "Brain read proxy error:",
-      err.response?.data || err.message
-    );
+    console.error("Brain read proxy error:", err.response?.data || err.message);
     return res.status(status).json({
       ok: false,
       error: err.message || "Brain read proxy failed",
     });
   }
 });
+
 
 
 

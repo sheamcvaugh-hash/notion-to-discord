@@ -514,7 +514,7 @@ app.get("/github/file", async (req, res) => {
 // ——— AGENT 20 READ PROXY ——— //
 app.post("/brain-read", async (req, res) => {
   try {
-    // Front-door auth: same as /brain-queue, /command, etc.
+    // Front-door auth: same pattern as /brain-queue, /command, /github/*
     if (RELAY_TOKEN && !authOk(req)) {
       return res.status(401).json({ ok: false, error: "Unauthorized" });
     }
@@ -536,34 +536,17 @@ app.post("/brain-read", async (req, res) => {
       });
     }
 
+    // Normalize AGENT_20_URL and build target URL
     const targetBase = AGENT_20_URL.replace(/\/+$/, "");
     const url = `${targetBase}/brain-read`;
 
+    // Relay → Agent 20: send the shared READ_API_KEY header
     const { data } = await axios.post(url, body, {
       headers: {
         "Content-Type": "application/json",
-        // This is what Agent 20 expects on the backend
         "x-read-api-key": READ_API_KEY || "",
       },
     });
-
-    return res.status(200).json(data);
-  } catch (err) {
-    const status = err.response?.status || 500;
-    console.error("Brain read proxy error:", err.response?.data || err.message);
-
-    const backendError =
-      err.response?.data?.error ||
-      err.response?.data?.message ||
-      err.message;
-
-    return res.status(status).json({
-      ok: false,
-      error: backendError || "Brain read proxy failed",
-    });
-  }
-});
-
 
     // Pass through whatever Agent 20 returns
     return res.status(200).json(data);
@@ -583,22 +566,6 @@ app.post("/brain-read", async (req, res) => {
     });
   }
 });
-
-
-
-// ——— HEALTHCHECK ENDPOINT ——— //
-app.get("/keepalive", (_req, res) => {
-  res.status(200).send("I'm alive");
-});
-
-// ——— START SERVER ——— //
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
-
-
-
-
 
 // ——— HEALTHCHECK ENDPOINT ——— //
 app.get("/keepalive", (_req, res) => {

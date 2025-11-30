@@ -567,6 +567,89 @@ app.post("/brain-read", async (req, res) => {
   }
 });
 
+// ——— AGENT 20 CONFLICT LOG RELAY ——— //
+// NOTE: The section that follows this one is: HEALTHCHECK ENDPOINT
+
+app.post("/agent20-conflict-log", async (req, res) => {
+  try {
+    // Same auth pattern as /brain-queue, /command, /github/*
+    if (RELAY_TOKEN && !authOk(req)) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
+
+    const body = req.body || {};
+    const { route, payload } = body;
+
+    if (!payload || typeof payload !== "object") {
+      return res.status(400).json({
+        ok: false,
+        error: "Missing or invalid payload in body",
+      });
+    }
+
+    // Expect the payload shape created in Agent20's logDigitalConflictEvent.
+    const {
+      brain,
+      conflict_type,
+      conflict_score,
+      blocked,
+      metadata = {},
+      old_entry_id,
+      new_entry_id,
+    } = payload;
+
+    const { kind, new_entry, existing_entry, queue_entry_id, source } = metadata;
+
+    const discordBody = {
+      route: route || "digital-conflict",
+      brain: brain || "digital_brain",
+      kind: kind || (blocked ? "hard_block" : "soft_update"),
+      blocked: !!blocked,
+      conflict_type: conflict_type || null,
+      conflict_score: conflict_score ?? null,
+      old_entry_id: old_entry_id ?? null,
+      new_entry_id: new_entry_id ?? null,
+      queue_entry_id: queue_entry_id ?? null,
+      source: source || null,
+      old_entry: existing_entry || null,
+      new_entry: new_entry || null,
+      // Simple emoji legend for manual decisions
+      legend: {
+        keep_new: "✅ keep new",
+        keep_old: "♻️ keep old",
+      },
+    };
+
+    const messagePayload = buildMessage(discordBody);
+
+    try {
+      if (DISCORD_WEBHOOK_GLOBAL) {
+        await axios.post(DISCORD_WEBHOOK_GLOBAL, messagePayload);
+      }
+      if (DISCORD_WEBHOOK_PERSONAL) {
+        await axios.post(DISCORD_WEBHOOK_PERSONAL, messagePayload);
+      }
+    } catch (e) {
+      console.warn(
+        "Discord conflict fan-out failed:",
+        e.response?.data || e.message
+      );
+    }
+
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    const status = err.status || err.response?.status || 500;
+    console.error(
+      "agent20-conflict-log error:",
+      err.response?.data || err.message
+    );
+    return res
+      .status(status)
+      .json({ ok: false, error: err.message || "Conflict relay failed" });
+  }
+});
+
+
 // ——— HEALTHCHECK ENDPOINT ——— //
 app.get("/keepalive", (_req, res) => {
   res.status(200).send("I'm alive");

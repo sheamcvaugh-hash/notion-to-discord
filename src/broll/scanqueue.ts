@@ -9,78 +9,75 @@ const ROOT_FOLDER_ID = process.env.GOOGLE_DRIVE_QUEUE_FOLDER_ID;
 const ROOT_FOLDER_NAME = 'Processing Queue';
 
 /**
- * Scans a specific Country folder within the Queue and returns a list of raw files.
+ * Scans ALL folders inside the "Processing Queue" root
+ * and returns a flattened list of all proxy files found.
  */
-export async function scanCountryQueue(
-  drive: any, 
-  country: string, 
-  maxFiles: number = 10
-): Promise<BrollFile[]> {
-  console.log(`[Queue Scanner] Starting scan for country: ${country}`);
+export async function scanProcessingQueue(drive: any, maxFilesPerFolder: number = 5): Promise<BrollFile[]> {
+  console.log(`[Queue Scanner] Starting global scan of Processing Queue...`);
+  let allFiles: BrollFile[] = [];
 
   try {
     // 1. Determine the Queue Root ID
-    let queueFolderId = ROOT_FOLDER_ID;
-
-    // If no ID in secrets, try to find it by name
-    if (!queueFolderId) {
-        console.log(`[Queue Scanner] No GOOGLE_DRIVE_QUEUE_FOLDER_ID found. Searching by name: '${ROOT_FOLDER_NAME}'...`);
-        queueFolderId = await getFolderId(drive, ROOT_FOLDER_NAME);
+    let rootId = ROOT_FOLDER_ID;
+    if (!rootId) {
+        console.log(`[Queue Scanner] No ID found in secrets. Searching by name: '${ROOT_FOLDER_NAME}'...`);
+        rootId = await getFolderId(drive, ROOT_FOLDER_NAME);
     }
 
-    if (!queueFolderId) {
-      throw new Error(`Critical: Queue folder (ID: ${process.env.GOOGLE_DRIVE_QUEUE_FOLDER_ID} or Name: '${ROOT_FOLDER_NAME}') not found.`);
+    if (!rootId) {
+      throw new Error(`Critical: Queue root folder not found.`);
     }
 
-    // 2. Find the specific Country folder inside the queue
-    // explicit cast to string to satisfy strict typescript checks
-    const countryFolderId = await getFolderId(drive, country, queueFolderId as string);
-    
-    if (!countryFolderId) {
-      console.warn(`[Queue Scanner] Country folder '${country}' does not exist inside queue ${queueFolderId}. Skipping.`);
-      return [];
-    }
-
-    // 3. List files in the Country folder
-    // We filter for video files that match our proxy naming convention (_low)
-    const res = await drive.files.list({
-      q: `'${countryFolderId}' in parents and name contains '_low' and mimeType contains 'video/' and trashed = false`,
-      fields: 'files(id, name, mimeType)',
-      pageSize: maxFiles,
+    // 2. Find ALL sub-folders inside the root
+    const folderRes = await drive.files.list({
+      q: `'${rootId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+      fields: 'files(id, name)',
+      pageSize: 50, 
     });
 
-    const files = res.data.files || [];
-    console.log(`[Queue Scanner] Found ${files.length} potential proxy files for ${country}.`);
+    const subFolders = folderRes.data.files || [];
+    console.log(`[Queue Scanner] Found ${subFolders.length} folders to check: ${subFolders.map((f:any) => f.name).join(', ')}`);
 
-    // 4. Map to our BrollFile interface
-    return files.map((f: any): BrollFile => ({
-      id: f.id,
-      name: f.name,
-      mimeType: f.mimeType,
-      isProxy: true
-    }));
+    // 3. Loop through each folder and find files
+    for (const folder of subFolders) {
+      console.log(`   📂 Checking folder: ${folder.name}...`);
+      
+      const fileRes = await drive.files.list({
+        q: `'${folder.id}' in parents and name contains '_low' and mimeType contains 'video/' and trashed = false`,
+        fields: 'files(id, name, mimeType)',
+        pageSize: maxFilesPerFolder,
+      });
+
+      const found = fileRes.data.files || [];
+      if (found.length > 0) {
+        console.log(`      Found ${found.length} files.`);
+        const mapped = found.map((f: any): BrollFile => ({
+          id: f.id,
+          name: f.name,
+          mimeType: f.mimeType,
+          isProxy: true
+        }));
+        allFiles = [...allFiles, ...mapped];
+      }
+    }
+
+    return allFiles;
 
   } catch (error) {
-    console.error(`[Queue Scanner] Error scanning queue for ${country}:`, error);
+    console.error(`[Queue Scanner] Error scanning queue:`, error);
     throw error;
   }
 }
 
 /**
- * Helper: Find a folder ID by name, optionally inside a parent folder.
+ * Helper: Find a folder ID by name
  */
-async function getFolderId(drive: any, name: string, parentId?: string): Promise<string | null> {
-  let query = `mimeType = 'application/vnd.google-apps.folder' and name = '${name}' and trashed = false`;
-  if (parentId) {
-    query += ` and '${parentId}' in parents`;
-  }
-
+async function getFolderId(drive: any, name: string): Promise<string | null> {
   const res = await drive.files.list({
-    q: query,
+    q: `mimeType = 'application/vnd.google-apps.folder' and name = '${name}' and trashed = false`,
     fields: 'files(id, name)',
     pageSize: 1,
   });
-
   const folder = res.data.files?.[0];
   return folder ? folder.id : null;
 }

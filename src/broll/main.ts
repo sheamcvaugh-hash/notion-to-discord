@@ -2,13 +2,12 @@
 import 'dotenv/config';
 import { google } from 'googleapis';
 import { createClient } from '@supabase/supabase-js'; 
-import { scanCountryQueue } from './scanqueue'; 
+import { scanProcessingQueue } from './scanqueue'; // <--- UPDATED IMPORT
 import { analyzeVideo } from './gemini';
 import * as fs from 'fs';
 import * as path from 'path';
 
 // CONFIGURATION
-const TARGET_COUNTRY = 'Japan'; 
 const SUPABASE_TABLE = 'broll_media_index';
 
 async function main() {
@@ -23,7 +22,6 @@ async function main() {
       console.log('🔑 Auth: Found local service_account.json');
       auth = new google.auth.GoogleAuth({ keyFile: keyFilePath, scopes: ['https://www.googleapis.com/auth/drive'] });
     } 
-    // FIXED: Using the correct secret name from your Fly list
     else if (process.env.GOOGLE_CREDENTIALS_JSON) {
       console.log('🔑 Auth: Using GOOGLE_CREDENTIALS_JSON from environment');
       const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
@@ -41,8 +39,8 @@ async function main() {
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // 3. SCANNING
-    console.log(`\n📂 Scanning for files in: ${TARGET_COUNTRY}...`);
-    const filesToProcess = await scanCountryQueue(drive, TARGET_COUNTRY);
+    // Now calls the correct global scanner function
+    const filesToProcess = await scanProcessingQueue(drive);
 
     if (filesToProcess.length === 0) {
       console.log('✅ No new files found to process.');
@@ -51,17 +49,31 @@ async function main() {
 
     // 4. PROCESSING LOOP
     for (const file of filesToProcess) {
-      console.log(`\n🎥 Processing: ${file.name} (${file.id})`);
-      
+      console.log(`\n🔍 Checking: ${file.name}...`);
+
       try {
+        // [CHECK] Does this file already exist in Supabase?
+        const { data: existing } = await supabase
+          .from(SUPABASE_TABLE)
+          .select('id')
+          .eq('drive_id', file.id)
+          .maybeSingle();
+
+        if (existing) {
+          console.log(`⏩ Skipping (Already in Database)`);
+          continue;
+        }
+
+        console.log(`🎥 New File! Sending to Gemini...`);
+        
         // A. Analyze with Gemini
         const analysisRaw = await analyzeVideo(drive, file);
         
-        // Clean up the JSON (Gemini sometimes adds markdown ```json blocks)
+        // Clean up the JSON
         const jsonString = analysisRaw.replace(/```json/g, '').replace(/```/g, '').trim();
         const analysisData = JSON.parse(jsonString);
 
-        console.log('🤖 Saving to Supabase:', analysisData.description);
+        console.log('🤖 Analysis done. Saving...');
 
         // B. Save to Supabase
         const { error } = await supabase
@@ -79,8 +91,6 @@ async function main() {
 
         if (error) throw error;
         console.log('✅ Saved successfully!');
-
-        // Optional: Move file in Drive to a "Processed" folder could happen here
         
       } catch (err) {
         console.error(`❌ Failed to process ${file.name}`, err);

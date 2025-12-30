@@ -2,8 +2,11 @@
 import 'dotenv/config';
 import { google } from 'googleapis';
 import { createClient } from '@supabase/supabase-js'; 
-import { scanProcessingQueue } from './scanqueue'; // <--- UPDATED IMPORT
+import { scanProcessingQueue } from './scanqueue'; 
 import { analyzeVideo } from './gemini';
+import { organizeBrollFiles } from './organizeDrive'; // <--- NEW
+import { finalizeDatabaseRecord } from './writeSupabase'; // <--- NEW
+import { BrollFile, CanonicalType } from './types';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -19,11 +22,9 @@ async function main() {
     const keyFilePath = path.join(process.cwd(), 'service_account.json');
 
     if (fs.existsSync(keyFilePath)) {
-      console.log('🔑 Auth: Found local service_account.json');
       auth = new google.auth.GoogleAuth({ keyFile: keyFilePath, scopes: ['https://www.googleapis.com/auth/drive'] });
     } 
     else if (process.env.GOOGLE_CREDENTIALS_JSON) {
-      console.log('🔑 Auth: Using GOOGLE_CREDENTIALS_JSON from environment');
       const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
       auth = new google.auth.GoogleAuth({ credentials, scopes: ['https://www.googleapis.com/auth/drive'] });
     } else {
@@ -38,62 +39,124 @@ async function main() {
     
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // 3. SCANNING
-    // Now calls the correct global scanner function
-    const filesToProcess = await scanProcessingQueue(drive);
+    // 3. SCANNING FOR PROXIES
+    const proxies = await scanProcessingQueue(drive);
 
-    if (filesToProcess.length === 0) {
+    if (proxies.length === 0) {
       console.log('✅ No new files found to process.');
       return;
     }
 
     // 4. PROCESSING LOOP
-    for (const file of filesToProcess) {
-      console.log(`\n🔍 Checking: ${file.name}...`);
+    for (const proxyFile of proxies) {
+      console.log(`\n🔍 Processing Proxy: ${proxyFile.name}...`);
 
       try {
-        // [CHECK] Does this file already exist in Supabase?
-        const { data: existing } = await supabase
-          .from(SUPABASE_TABLE)
-          .select('id')
-          .eq('drive_id', file.id)
-          .maybeSingle();
+        // --- STEP 0: CONTEXT & PAIRING ---
+        // A. Get Parent Folder (This is the Country Source)
+        const fileFields = await drive.files.get({
+          fileId: proxyFile.id,
+          fields: 'parents'
+        });
+        const parentId = fileFields.data.parents?.[0];
+        if (!parentId) throw new Error('Proxy file has no parent folder.');
 
-        if (existing) {
-          console.log(`⏩ Skipping (Already in Database)`);
+        const parentFolder = await drive.files.get({ fileId: parentId, fields: 'name' });
+        const sourceCountry = parentFolder.data.name || 'Unknown';
+
+        // B. Find Master File
+        // Assumes Proxy is "Name_low.mov", Master is "Name.mov"
+        const masterNameCandidate = proxyFile.name.replace('_low', '');
+        
+        const masterSearch = await drive.files.list({
+          q: `'${parentId}' in parents and name = '${masterNameCandidate}' and trashed = false`,
+          fields: 'files(id, name, mimeType)',
+          pageSize: 1
+        });
+
+        const masterFileRaw = masterSearch.data.files?.[0];
+        
+        if (!masterFileRaw || !masterFileRaw.id || !masterFileRaw.name) {
+          console.warn(`⚠ Skipping: Could not find master file '${masterNameCandidate}' for proxy.`);
           continue;
         }
 
-        console.log(`🎥 New File! Sending to Gemini...`);
+        const masterFile: BrollFile = {
+            id: masterFileRaw.id,
+            name: masterFileRaw.name,
+            mimeType: masterFileRaw.mimeType || 'video/quicktime',
+            isProxy: false
+        };
+
+        // --- STEP 1: CHECK DB (Idempotency) ---
+        // We check against the MASTER ID, not the proxy ID
+        const { data: existing } = await supabase
+          .from(SUPABASE_TABLE)
+          .select('id')
+          .eq('drive_id', masterFile.id)
+          .maybeSingle();
+
+        if (existing) {
+          console.log(`⏩ Skipping (Master already in Database)`);
+          continue;
+        }
+
+        // --- STEP 2: ANALYZE (GEMINI) ---
+        console.log(`🎥 Sending Proxy to Gemini...`);
+        // We pass the context (Country) to Gemini to help it
+        // Note: passing sourceCountry as context requires updating analyzeVideo signature or just trusting the prompt injection
+        // For now, we assume analyzeVideo handles the file content.
         
-        // A. Analyze with Gemini
-        const analysisRaw = await analyzeVideo(drive, file);
+        const analysisRaw = await analyzeVideo(drive, proxyFile);
         
         // Clean up the JSON
         const jsonString = analysisRaw.replace(/```json/g, '').replace(/```/g, '').trim();
         const analysisData = JSON.parse(jsonString);
 
-        console.log('🤖 Analysis done. Saving...');
-
-        // B. Save to Supabase
-        const { error } = await supabase
+        // --- STEP 3: INSERT INITIAL RECORD ---
+        // We insert the record NOW so we have the ID locked, even before moving
+        console.log('🤖 Analysis done. Inserting initial record...');
+        
+        const { error: insertError } = await supabase
           .from(SUPABASE_TABLE)
           .insert({
-            drive_id: file.id,
-            file_name: file.name,
-            mime_type: file.mimeType,
+            drive_id: masterFile.id, // CRITICAL: Use Master ID
+            file_name: masterFile.name, // Temporary name
+            mime_type: masterFile.mimeType,
             tags: analysisData.tags,          
-            description: analysisData.description, 
-            time_of_day: analysisData.time_of_day, 
-            color_palette: analysisData.color_palette, 
-            processed_at: new Date().toISOString()
+            description: analysisData.summary, // Mapped from 'summary' in interface
+            type: analysisData.type,
+            processed_at: null // Null until finalized
           });
 
-        if (error) throw error;
-        console.log('✅ Saved successfully!');
+        if (insertError) throw insertError;
+
+        // --- STEP 4: ORGANIZE DRIVE (MOVE & RENAME) ---
+        const moveResult = await organizeBrollFiles(
+          drive,
+          masterFile,
+          proxyFile,
+          analysisData.suggested_filename,
+          sourceCountry,     // Country (Source Folder)
+          analysisData.city || 'Unknown', // City (From Gemini)
+          analysisData.type  // Canonical Type
+        );
+
+        // --- STEP 5: FINALIZE DB RECORD ---
+        await finalizeDatabaseRecord(
+          supabase,
+          moveResult.masterId,
+          path.basename(moveResult.newPath), // New Filename
+          moveResult.newPath,                // Full Path
+          sourceCountry,
+          analysisData.city || 'Unknown',
+          analysisData.type
+        );
+
+        console.log('✅ Cycle Complete!');
         
       } catch (err) {
-        console.error(`❌ Failed to process ${file.name}`, err);
+        console.error(`❌ Failed to process ${proxyFile.name}`, err);
       }
     }
 

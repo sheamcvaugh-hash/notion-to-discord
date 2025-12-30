@@ -1,8 +1,10 @@
 // src/broll/scanqueue.ts
 import { BrollFile } from './types';
 
+// FORCE FIX: Tell TypeScript to ignore the missing process definition
+declare const process: any;
+
 // CONSTANTS
-// We prioritize the ID from secrets, but keep the name as a fallback for local testing
 const ROOT_FOLDER_ID = process.env.GOOGLE_DRIVE_QUEUE_FOLDER_ID;
 const ROOT_FOLDER_NAME = 'Processing Queue';
 
@@ -31,7 +33,9 @@ export async function scanCountryQueue(
     }
 
     // 2. Find the specific Country folder inside the queue
-    const countryFolderId = await getFolderId(drive, country, queueFolderId);
+    // explicit cast to string to satisfy strict typescript checks
+    const countryFolderId = await getFolderId(drive, country, queueFolderId as string);
+    
     if (!countryFolderId) {
       console.warn(`[Queue Scanner] Country folder '${country}' does not exist inside queue ${queueFolderId}. Skipping.`);
       return [];

@@ -4,7 +4,8 @@
   "description": "Periodically checks a Notion database and sends formatted updates to Discord webhooks.",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "process-broll": "ts-node src/broll/main.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

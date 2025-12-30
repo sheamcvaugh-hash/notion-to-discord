@@ -1,13 +1,13 @@
-// src/broll/scanQueue.ts
+// src/broll/scanqueue.ts
 import { BrollFile } from './types';
 
 // CONSTANTS
+// We prioritize the ID from secrets, but keep the name as a fallback for local testing
+const ROOT_FOLDER_ID = process.env.GOOGLE_DRIVE_QUEUE_FOLDER_ID;
 const ROOT_FOLDER_NAME = 'Processing Queue';
 
 /**
- * Scans a specific Country folder within the "Processing Queue"
- * and returns a list of raw files found.
- * * NOTE: We use 'any' for the drive client to bypass strict TypeScript version conflicts.
+ * Scans a specific Country folder within the Queue and returns a list of raw files.
  */
 export async function scanCountryQueue(
   drive: any, 
@@ -17,22 +17,28 @@ export async function scanCountryQueue(
   console.log(`[Queue Scanner] Starting scan for country: ${country}`);
 
   try {
-    // 1. Find the "Processing Queue" root folder
-    const queueFolderId = await getFolderId(drive, ROOT_FOLDER_NAME);
+    // 1. Determine the Queue Root ID
+    let queueFolderId = ROOT_FOLDER_ID;
+
+    // If no ID in secrets, try to find it by name
     if (!queueFolderId) {
-      throw new Error(`Critical: Root folder '${ROOT_FOLDER_NAME}' not found.`);
+        console.log(`[Queue Scanner] No GOOGLE_DRIVE_QUEUE_FOLDER_ID found. Searching by name: '${ROOT_FOLDER_NAME}'...`);
+        queueFolderId = await getFolderId(drive, ROOT_FOLDER_NAME);
+    }
+
+    if (!queueFolderId) {
+      throw new Error(`Critical: Queue folder (ID: ${process.env.GOOGLE_DRIVE_QUEUE_FOLDER_ID} or Name: '${ROOT_FOLDER_NAME}') not found.`);
     }
 
     // 2. Find the specific Country folder inside the queue
     const countryFolderId = await getFolderId(drive, country, queueFolderId);
     if (!countryFolderId) {
-      console.warn(`[Queue Scanner] Country folder '${country}' does not exist in queue. Skipping.`);
+      console.warn(`[Queue Scanner] Country folder '${country}' does not exist inside queue ${queueFolderId}. Skipping.`);
       return [];
     }
 
     // 3. List files in the Country folder
     // We filter for video files that match our proxy naming convention (_low)
-    // Note: 'trashed = false' is critical to avoid deleted files
     const res = await drive.files.list({
       q: `'${countryFolderId}' in parents and name contains '_low' and mimeType contains 'video/' and trashed = false`,
       fields: 'files(id, name, mimeType)',
@@ -47,7 +53,7 @@ export async function scanCountryQueue(
       id: f.id,
       name: f.name,
       mimeType: f.mimeType,
-      isProxy: true // By definition of our search query above
+      isProxy: true
     }));
 
   } catch (error) {

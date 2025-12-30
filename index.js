@@ -3,6 +3,7 @@ require('dotenv').config();
 // ——— DEPENDENCIES & SETUP ——— //
 const express = require("express");
 const axios = require("axios");
+const { exec } = require('child_process'); // <--- Added for B-Roll Agent
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -649,6 +650,30 @@ app.post("/agent20-conflict-log", async (req, res) => {
   }
 });
 
+// ——— B-ROLL AGENT ENDPOINT ——— //
+app.post('/api/process-broll', (req, res) => {
+  console.log('⚡️ API Trigger: Starting B-Roll Processing...');
+  
+  // We spawn the TypeScript process immediately and return a "Work Started" response
+  // This prevents the request from timing out while Gemini thinks.
+  const worker = exec('npx ts-node src/broll/main.ts', (error, stdout, stderr) => {
+    if (error) {
+      console.error(`[Worker Error]: ${error.message}`);
+      return;
+    }
+    if (stderr) {
+      console.error(`[Worker Stderr]: ${stderr}`);
+    }
+    console.log(`[Worker Output]: ${stdout}`);
+  });
+
+  // Respond immediately to the Apple Shortcut
+  res.json({ 
+    success: true, 
+    message: "B-Roll Agent started. Check server logs for progress.",
+    status: "processing"
+  });
+});
 
 // ——— HEALTHCHECK ENDPOINT ——— //
 app.get("/keepalive", (_req, res) => {

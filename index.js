@@ -633,22 +633,26 @@ app.post('/api/process-broll', (req, res) => {
   // We pass city as an argument to main.ts. 
   // Country is validated here but main.ts derives it from the queue folder source of truth.
   // Note: We wrap city in quotes to handle spaces safely
-  const safeCity = city.replace(/"/g, '\\"');
+  const safeCountry = country.replace(/"/g, '\\"');const safeCity = city.replace(/"/g, '\\"');
   
-  const worker = exec(`npx ts-node src/broll/main.ts "${safeCity}"`, (error, stdout, stderr) => {
-    if (error) {
-      console.error(`[Worker Error]: ${error.message}`);
-      return;
+  // FIXED: Using `tsx` instead of `ts-node` to handle ESM/CJS interop cleanly.
+  // --yes: Accepts the install prompt automatically if tsx is missing.
+  const worker = exec(
+    `npx --yes tsx src/broll/main.ts "${safeCountry}" "${safeCity}"`,
+    (error, stdout, stderr) => {
+      if (error) {
+        console.error(`[Worker Error]: ${error.message}`);
+        return;
+      }
+      if (stderr) {
+        console.error(`[Worker Stderr]: ${stderr}`);
+      }
+      console.log(`[Worker Output]: ${stdout}`);
     }
-    if (stderr) {
-      console.error(`[Worker Stderr]: ${stderr}`);
-    }
-    console.log(`[Worker Output]: ${stdout}`);
-  });
+  );
 
   res.json({ 
     success: true, 
-    message: `B-Roll Agent started for ${city}, ${country}.`,
     status: "processing"
   });
 });

@@ -1,22 +1,16 @@
-// src/broll/scanqueue.ts
+// src/broll/scanQueue.ts
 import { BrollFile } from './types';
 
-// FORCE FIX: Tell TypeScript to ignore the missing process definition
 declare const process: any;
 
-// CONSTANTS
-const ROOT_FOLDER_ID = process.env.GOOGLE_DRIVE_QUEUE_FOLDER_ID;
 const ROOT_FOLDER_NAME = 'Processing Queue';
 
-/**
- * Scans EXACTLY one country folder inside the "Processing Queue" root.
- * Returns only proxy files (*_low.*).
- * Throws an error if the country folder does not exist.
- */
 export async function scanProcessingQueue(drive: any, country: string): Promise<BrollFile[]> {
   console.log(`[Queue Scanner] Starting scoped scan for Country: ${country}`);
 
   try {
+    const ROOT_FOLDER_ID = process.env.GOOGLE_DRIVE_QUEUE_FOLDER_ID;
+
     // 1. Determine the Queue Root ID
     let rootId = ROOT_FOLDER_ID;
     if (!rootId) {
@@ -28,28 +22,35 @@ export async function scanProcessingQueue(drive: any, country: string): Promise<
       throw new Error(`Critical: Queue root folder not found.`);
     }
 
-    // 2. Resolve the Specific Country Folder
-    // We do NOT list all folders. We look for exactly one.
-    const countryFolderRes = await drive.files.list({
-      q: `'${rootId}' in parents and mimeType = 'application/vnd.google-apps.folder' and name = '${country}' and trashed = false`,
+    // --- DEBUG LOG START ---
+    console.log(`[DEBUG] Scanning inside Folder ID: ${rootId}`);
+    // --- DEBUG LOG END ---
+
+    // 2. Resolve the Specific Country Folder (CASE INSENSITIVE)
+    const allFoldersRes = await drive.files.list({
+      q: `'${rootId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
       fields: 'files(id, name)',
-      pageSize: 1, 
+      pageSize: 100, 
     });
 
-    const countryFolder = countryFolderRes.data.files?.[0];
+    const allFolders = allFoldersRes.data.files || [];
+    
+    // Find matching folder (ignoring case)
+    const countryFolder = allFolders.find((f: any) => f.name.toLowerCase() === country.toLowerCase());
 
     if (!countryFolder) {
-      // FAIL FAST: If the folder for the requested country doesn't exist, we stop.
-      throw new Error(`Queue folder for country '${country}' does not exist.`);
+      // List what we DID see to help debug
+      const seenNames = allFolders.map((f: any) => f.name).join(', ');
+      throw new Error(`Queue folder for country '${country}' does not exist. (I saw these folders: [${seenNames}])`);
     }
 
     console.log(`   📂 Accessing folder: ${countryFolder.name} (${countryFolder.id})`);
 
-    // 3. List ONLY proxy files in that folder
+    // 3. List ONLY proxy files
     const fileRes = await drive.files.list({
       q: `'${countryFolder.id}' in parents and name contains '_low' and mimeType contains 'video/' and trashed = false`,
       fields: 'files(id, name, mimeType)',
-      pageSize: 100, // Reasonable batch size
+      pageSize: 100,
     });
 
     const found = fileRes.data.files || [];
@@ -76,9 +77,6 @@ export async function scanProcessingQueue(drive: any, country: string): Promise<
   }
 }
 
-/**
- * Helper: Find a folder ID by name (Used only for Root fallback)
- */
 async function getFolderId(drive: any, name: string): Promise<string | null> {
   const res = await drive.files.list({
     q: `mimeType = 'application/vnd.google-apps.folder' and name = '${name}' and trashed = false`,

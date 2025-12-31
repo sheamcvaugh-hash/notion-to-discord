@@ -13,18 +13,26 @@ interface MoveResult {
 
 /**
  * 1) SINGLE NORMALIZATION FUNCTION (MANDATORY)
- * Applies ONLY the four allowed rules:
+ * Applies ONLY the allowed rules + TITLE CASING:
  * - Trim whitespace
  * - Replace / with -
  * - Collapse multiple spaces
  * - Remove leading/trailing dots
+ * - ENFORCE TITLE CASE (e.g. "drone" -> "Drone")
  */
 function normalizeFolderName(input: string): string {
-  return input
+  const cleaned = input
     .trim()
     .replace(/\//g, '-')           // Replace / with -
     .replace(/\s+/g, ' ')          // Collapse multiple spaces
     .replace(/^\.+|\.+$/g, '');    // Remove leading/trailing dots
+  
+  // Apply Title Case to cleaned string
+  return cleaned
+    .toLowerCase()
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
 }
 
 /**
@@ -48,7 +56,6 @@ function buildLibraryPath(country: string, city: string, type: string): {
 export async function organizeBrollFiles(
   drive: DriveClient,
   masterFile: BrollFile,
-  proxyFile: BrollFile,
   suggestedName: string,
   rawCountry: string,
   rawCity: string,
@@ -57,7 +64,7 @@ export async function organizeBrollFiles(
   const LIBRARY_ROOT_ID = process.env.GOOGLE_DRIVE_LIBRARY_FOLDER_ID;
   if (!LIBRARY_ROOT_ID) throw new Error('FATAL: GOOGLE_DRIVE_LIBRARY_FOLDER_ID is not set.');
 
-  // Normalize Filename (using same strict rules, NO kebab-case)
+  // Normalize Filename (using same strict rules, NO kebab-case, but Title Case looks nice)
   const safeFilename = normalizeFolderName(suggestedName);
   
   // Build Deterministic Path
@@ -125,16 +132,11 @@ export async function organizeBrollFiles(
     const isSafe = verification.data.parents?.includes(typeId);
     
     if (!isSafe) {
-      throw new Error(`CRITICAL: Verification failed. Master file ${masterFile.id} is NOT in target folder ${typeId}. Aborting proxy deletion.`);
+      throw new Error(`CRITICAL: Verification failed. Master file ${masterFile.id} is NOT in target folder ${typeId}.`);
     }
 
-    // 5. DELETE PROXY
-    // Only executed if Step 4 passes
-    await drive.files.update({
-      fileId: proxyFile.id,
-      requestBody: { trashed: true },
-    });
-    console.log(`   🗑 Proxy file trashed (Safety check passed).`);
+    // NOTE: Proxy handling has been moved to main.ts to ensure atomicity with DB write.
+    // We return success here so the DB write can proceed.
 
     return {
       success: true,
@@ -147,6 +149,39 @@ export async function organizeBrollFiles(
     throw error;
   }
 }
+
+/**
+ * 3) MOVE PROXY TO OUTBOX (New Step 4.5 Helper)
+ * Moves the proxy file to the dedicated Outbox folder.
+ * NEVER deletes.
+ */
+export async function moveProxyToOutbox(drive: DriveClient, proxyId: string): Promise<void> {
+  const OUTBOX_ID = process.env.GOOGLE_DRIVE_OUTBOX_FOLDER_ID;
+  
+  if (!OUTBOX_ID) {
+     throw new Error("FATAL: GOOGLE_DRIVE_OUTBOX_FOLDER_ID is not set in environment variables.");
+  }
+
+  console.log(`   📦 Moving Proxy to Outbox...`);
+
+  // 1. Get current parents to remove them
+  const fileData = await drive.files.get({ 
+    fileId: proxyId, 
+    fields: 'parents' 
+  });
+  const previousParents = fileData.data.parents?.join(',') || '';
+
+  // 2. Move to Outbox (Add Outbox ID, Remove Old Parents)
+  await drive.files.update({
+    fileId: proxyId,
+    addParents: OUTBOX_ID,
+    removeParents: previousParents,
+    fields: 'id, parents',
+  });
+
+  console.log(`   ✔ Proxy moved to Outbox (ID: ${OUTBOX_ID})`);
+}
+
 
 // --- HELPER FUNCTIONS ---
 

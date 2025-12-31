@@ -10,6 +10,7 @@ This document describes the **current reality** of the B-Roll Processing System.
 4.  **Validate (Logic):** AI output is checked against a strict schema (types, forbidden chars).
 5.  **Organize (Drive):** Master file is renamed and moved to `Library/<Country>/<City>/<Type>/`.
 6.  **Index (Supabase):** Metadata is written to `broll_media_index`.
+7.  **Outbox (Drive):** Proxy file is **moved** to the `Outbox` folder (never deleted).
 
 ## Component Responsibilities
 
@@ -27,6 +28,7 @@ This document describes the **current reality** of the B-Roll Processing System.
     * Iterates through found proxy files.
     * Handles "Fail Safe" logic (errors log and skip; process does not crash).
     * Links Proxy files back to Master files.
+    * **Atomicity Enforcer:** Ensures Proxy is only moved to Outbox after DB write confirms success.
 
 ### 3. Queue Scanner (`src/broll/scanQueue.ts`)
 * **Role:** Input Discovery.
@@ -50,7 +52,8 @@ This document describes the **current reality** of the B-Roll Processing System.
     * Creates folder hierarchy: `Library` -> `Country` -> `City` -> `Type`.
     * Renames Master file.
     * Moves Master file.
-    * **Deletes Proxy file** (only after verification of move).
+    * **Moves Proxy file to Outbox** (via `moveProxyToOutbox` helper).
+    * **Invariant:** Never deletes or trashes files.
 
 ### 6. Validator (`src/broll/types.ts`)
 * **Role:** Gatekeeper.

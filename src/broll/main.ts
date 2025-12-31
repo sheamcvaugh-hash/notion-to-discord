@@ -4,7 +4,7 @@ import { google } from 'googleapis';
 import { createClient } from '@supabase/supabase-js'; 
 import { scanProcessingQueue } from './scanQueue';
 import { analyzeVideo } from './gemini';
-import { organizeBrollFiles } from './organizeDrive';
+import { organizeBrollFiles, moveProxyToOutbox } from './organizeDrive';
 import { writeCanonicalRecord } from './writeSupabase';
 import { BrollFile } from './types';
 import * as fs from 'fs';
@@ -13,9 +13,20 @@ import * as path from 'path';
 // CONFIGURATION
 const SUPABASE_TABLE = 'broll_media_index';
 
-// CLI ARGUMENT PARSING
-const TARGET_COUNTRY = process.argv[2];
-const TARGET_CITY = process.argv[3];
+// HELPER: FORCE TITLE CASE
+// Ensures "mexico" -> "Mexico"
+function toTitleCase(str: string): string {
+  if (!str) return '';
+  return str
+    .toLowerCase()
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+// CLI ARGUMENT PARSING (Normalized immediately)
+const TARGET_COUNTRY = toTitleCase(process.argv[2]);
+const TARGET_CITY = toTitleCase(process.argv[3]);
 
 async function main() {
   console.log('🚀 B-Roll Processor Starting...');
@@ -69,9 +80,9 @@ async function main() {
       console.log(`🔍 Processing Proxy: ${proxyFile.name}...`);
 
       try {
-        // --- STEP 1: CONTEXT & PAIRING ---
         const sourceCountry = TARGET_COUNTRY as string;
 
+        // Step 1: Find Parent
         const fileFields = await drive.files.get({
           fileId: proxyFile.id,
           fields: 'parents'
@@ -79,6 +90,7 @@ async function main() {
         const parentId = fileFields.data.parents?.[0];
         if (!parentId) throw new Error('Proxy file has no parent folder.');
 
+        // Step 2: Find Master
         const masterNameCandidate = proxyFile.name.replace('_low', '');
         
         const masterSearch = await drive.files.list({
@@ -101,7 +113,7 @@ async function main() {
             isProxy: false
         };
 
-        // --- STEP 2: IDEMPOTENCY CHECK ---
+        // Step 3: Idempotency
         const { data: existing } = await supabase
           .from(SUPABASE_TABLE)
           .select('id')
@@ -113,20 +125,18 @@ async function main() {
           continue;
         }
 
-        // --- STEP 3: ANALYZE & VALIDATE (GEMINI) ---
-        // This function now guarantees STRICT VALIDATION or throws.
+        // Step 4: Analyze
         console.log(`🎥 Sending Proxy to Gemini...`);
         const analysis = await analyzeVideo(drive, proxyFile);
 
         console.log(`   + Validated Type: ${analysis.type}`);
         console.log(`   + Validated Filename: ${analysis.suggested_filename}`);
 
-        // --- STEP 4: ORGANIZE DRIVE (MOVE & RENAME) ---
-        // Only reached if validation passed.
+        // Step 5: Organize Master (Renames and Moves Master)
+        // Note: Proxy is NOT touched here anymore to ensure atomicity
         const moveResult = await organizeBrollFiles(
           drive,
           masterFile,
-          proxyFile,
           analysis.suggested_filename,
           sourceCountry,
           TARGET_CITY,   
@@ -137,7 +147,7 @@ async function main() {
             throw new Error("Drive Organization failed silently.");
         }
 
-        // --- STEP 5: WRITE DB RECORD ---
+        // Step 6: Write DB
         await writeCanonicalRecord(supabase, {
             file_name: path.basename(moveResult.newPath),
             drive_file_id: masterFile.id,
@@ -149,10 +159,12 @@ async function main() {
             summary: analysis.summary
         });
 
+        // Step 7: Move Proxy to Outbox (Atomic requirement: Only after DB write)
+        await moveProxyToOutbox(drive, proxyFile.id);
+
         console.log('✅ Cycle Complete for this clip!');
         
       } catch (err: any) {
-        // Safe skip: Log error and continue to next file. DO NOT EXIT PROCESS.
         console.error(`❌ FAILED ${proxyFile.name}: ${err.message}`);
       }
     }
@@ -163,4 +175,4 @@ async function main() {
   }
 }
 
-main();
+main().catch(err => console.error("Unhandled Top-Level Error:", err));

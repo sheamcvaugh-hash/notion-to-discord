@@ -2,6 +2,7 @@
 
 **Root Structure:**
 * **Library Root** (`GOOGLE_DRIVE_LIBRARY_FOLDER_ID`)
+* **Outbox Root** (`GOOGLE_DRIVE_OUTBOX_FOLDER_ID`)
 
 ## 1. Input Processing
 * Input scanning logic is handled by the Queue Scanner (external to this spec).
@@ -34,3 +35,12 @@ Folder and file names are normalized using **only** the following rules, applied
 * **Format:** `<Normalized-Suggested-Name>.<ext>`
 * Applies the same normalization rules as folders.
 * Preserves original casing.
+
+## 3. Outbox (Proxy Storage)
+* **Folder ID:** Defined by `GOOGLE_DRIVE_OUTBOX_FOLDER_ID`.
+* **Purpose:** Stores processed proxy files (`_low`) to prevent automatic data loss.
+* **Invariants:**
+    * Files are **moved** here, never copied.
+    * No subfolders are created in the Outbox.
+    * Files are **never deleted** by the system.
+    * Cleanup is a manual human process.

@@ -6,19 +6,42 @@ import path from 'path';
 import os from 'os';
 import { BrollFile, AnalysisResult, CanonicalType, validateGeminiOutput } from './types';
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-const fileManager = new GoogleAIFileManager(process.env.GEMINI_API_KEY || '');
+// UPDATED: Prioritize the specific B-Roll Agent Key, fallback to generic if missing
+const API_KEY = process.env.GEMINI_BROLL_AGENT || process.env.GEMINI_API_KEY || '';
+
+const genAI = new GoogleGenerativeAI(API_KEY);
+const fileManager = new GoogleAIFileManager(API_KEY);
+
+// ROBUST MODEL LIST: We try these in order until one works.
+// This handles deprecations (e.g. 001 retiring) automatically.
+const MODELS_TO_TRY = [
+    "gemini-1.5-flash-002",  // Latest Stable Flash
+    "gemini-1.5-pro-002",    // Latest Stable Pro (Backup)
+    "gemini-1.5-flash",      // Generic Alias (Backup 2)
+    "gemini-2.0-flash-exp"   // Experimental (Last Resort)
+];
 
 export async function analyzeVideo(drive: any, file: BrollFile): Promise<AnalysisResult> {
   const tempPath = path.join(os.tmpdir(), file.name);
   
+  // Fail fast if auth is missing
+  if (!API_KEY) {
+      throw new Error("MISSING AUTH: GEMINI_BROLL_AGENT is not set.");
+  }
+
   try {
     // 1. Download
     console.log(`[Gemini] 1. Downloading '${file.name}' locally...`);
     await downloadFromDrive(drive, file.id, tempPath);
 
+    // Verify file size before uploading
+    const stats = fs.statSync(tempPath);
+    if (stats.size === 0) {
+        throw new Error("Downloaded file is empty (0 bytes).");
+    }
+
     // 2. Upload to Gemini
-    console.log(`[Gemini] 2. Uploading to Gemini workspace...`);
+    console.log(`[Gemini] 2. Uploading to Gemini workspace (${stats.size} bytes)...`);
     const uploadResponse = await fileManager.uploadFile(tempPath, {
       mimeType: file.mimeType,
       displayName: file.name,
@@ -79,17 +102,39 @@ export async function analyzeVideo(drive: any, file: BrollFile): Promise<Analysi
       If you cannot comply with strict JSON or these rules, output exactly: INVALID_OUTPUT
     `;
 
-    // 5. Generate Content
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    const result = await model.generateContent([
-      {
-        fileData: {
-          mimeType: uploadResponse.file.mimeType,
-          fileUri: uploadResponse.file.uri
+    // 5. Generate Content with Fallback Loop
+    let lastError;
+    let result = null;
+
+    for (const modelName of MODELS_TO_TRY) {
+        try {
+            console.log(`[Gemini]    Trying model: ${modelName}...`);
+            const model = genAI.getGenerativeModel({ model: modelName });
+            
+            result = await model.generateContent([
+              {
+                fileData: {
+                  mimeType: uploadResponse.file.mimeType,
+                  fileUri: uploadResponse.file.uri
+                }
+              },
+              { text: promptText }
+            ]);
+            
+            // If we get here, it worked! Break the loop.
+            console.log(`[Gemini]    Success with ${modelName}!`);
+            break; 
+
+        } catch (err: any) {
+            console.warn(`[Gemini]    Failed on ${modelName} (${err.status || err.message}). Switching...`);
+            lastError = err;
+            // Continue to next model
         }
-      },
-      { text: promptText }
-    ]);
+    }
+
+    if (!result) {
+        throw new Error(`All Gemini models failed. Last error: ${lastError?.message}`);
+    }
 
     const rawText = result.response.text().trim();
 
@@ -125,6 +170,7 @@ export async function analyzeVideo(drive: any, file: BrollFile): Promise<Analysi
   }
 }
 
+// FIXED: Robust download function that waits for disk write to complete
 async function downloadFromDrive(drive: any, fileId: string, destPath: string): Promise<void> {
   const dest = fs.createWriteStream(destPath);
   const res = await drive.files.get(
@@ -134,8 +180,9 @@ async function downloadFromDrive(drive: any, fileId: string, destPath: string): 
 
   return new Promise((resolve, reject) => {
     res.data
-      .on('end', () => resolve())
       .on('error', (err: any) => reject(err))
-      .pipe(dest);
+      .pipe(dest)
+      .on('error', (err: any) => reject(err))
+      .on('finish', () => resolve()); // Waits for file to close properly
   });
 }

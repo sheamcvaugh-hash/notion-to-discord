@@ -27,12 +27,15 @@ When triggered, the system will:
 2.  Spawn a background worker (`main.ts`).
 3.  Scan `Queue/Mexico/` for `*_low.*` files.
 4.  Process them one by one.
+5.  Move processed masters to the Library.
+6.  **Move processed proxies to the Outbox folder.** (Proxies are NEVER deleted).
 
 ## 3. Logs & Monitoring
 
 **Success Indicators:**
 * Log: `🚀 B-Roll Processor Starting...`
 * Log: `📍 Context: Country = Mexico, City = Querétaro`
+* Log: `✔ Proxy moved to Outbox (ID: ...)`
 * Log: `✅ Cycle Complete for this clip!`
 
 **Common Failures:**
@@ -43,10 +46,13 @@ When triggered, the system will:
 * `Gemini signaled INVALID_OUTPUT.`
     * *Cause:* Video was unrecognizable or violated safety guidelines.
 * `CRITICAL: Verification failed. Master file ... is NOT in target folder.`
-    * *Cause:* Drive API latency or permissions issue. The proxy is **not** deleted in this case.
+    * *Cause:* Drive API latency or permissions issue. The proxy remains in the Queue.
 
 ## 4. Emergency Stop
 To stop a running process:
 1.  Identify the `ts-node` process or the Node container.
 2.  Kill the process.
 3.  **Recovery:** The system is idempotent. You can re-run the same trigger; files already processed (in DB) will be skipped (`⏩ Skipping: Master file ... is already in the database`).
+
+## 5. Maintenance (Manual)
+* **Outbox Purge:** The `Outbox` folder accumulates `_low` proxy files. These must be deleted manually via Google Drive UI when desired. The system will never delete them automatically.

@@ -3,7 +3,7 @@ require('dotenv').config();
 // ——— DEPENDENCIES & SETUP ——— //
 const express = require("express");
 const axios = require("axios");
-const { exec } = require('child_process'); // <--- Added for B-Roll Agent
+const { exec } = require('child_process'); // <--- For B-Roll Agent
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -16,13 +16,12 @@ const {
   DISCORD_WEBHOOK_PERSONAL,
   SUPABASE_URL,
   SUPABASE_SERVICE_ROLE_KEY,
-  RELAY_TOKEN, // shared secret for ChatGPT → Relay auth
-  GHL_API_KEY, // GoHighLevel Location API key (v1)
-  GHL_LOCATION_ID, // optional, kept for reference
-  SUBSTACK_WEBHOOK_TOKEN, // shared secret for Substack webhooks (?token=...)
-  AGENT_20_URL,          // our own public URL
-  GITHUB_PERSONAL_ACCESS_TOKEN, // fine-grained PAT, read-only
-  READ_API_KEY, // shared secret for Agent 20 read requests
+  RELAY_TOKEN, 
+  GHL_API_KEY, 
+  SUBSTACK_WEBHOOK_TOKEN, 
+  AGENT_20_URL,          
+  GITHUB_PERSONAL_ACCESS_TOKEN, 
+  READ_API_KEY, 
 } = process.env;
 
 
@@ -46,7 +45,6 @@ function authOk(req) {
 
 // ——— HELPERS ——— //
 function buildMessage(entry) {
-  // Pass through as-is, nicely formatted for Discord
   return { content: JSON.stringify(entry, null, 2) };
 }
 
@@ -91,18 +89,16 @@ function mapToBrainQueue(body, metaFrom = null) {
 
 // ——— SUPABASE WRITE — NOW SMART (Agent 20 ready) ——— //
 async function insertBrainQueueRow(row) {
-  // If we have our own public URL configured → route writes through Agent 20 endpoint
   if (AGENT_20_URL) {
     const url = `${AGENT_20_URL}/agent20-write`;
     const headers = {
       "Content-Type": "application/json",
-      "x-relay-token": RELAY_TOKEN || "", // extra safety
+      "x-relay-token": RELAY_TOKEN || "", 
     };
     const { data } = await axios.post(url, { row }, { headers });
     return data?.inserted;
   }
 
-  // Fallback: old direct write (still works locally or if you ever remove the var)
   const url = `${SUPABASE_URL}/rest/v1/brain_queue`;
   const headers = {
     apikey: SUPABASE_SERVICE_ROLE_KEY,
@@ -115,9 +111,6 @@ async function insertBrainQueueRow(row) {
 }
 
 // ——— GOHIGHLEVEL (CONTACTS, API v1) ——— //
-// Uses v1 API with Location API key:
-//   POST https://rest.gohighlevel.com/v1/contacts/
-//   Authorization: Bearer <GHL_API_KEY>
 async function createOrUpdateGhlContactFromSubstack(subscriber) {
   if (!GHL_API_KEY) {
     const err = new Error(
@@ -147,7 +140,6 @@ async function createOrUpdateGhlContactFromSubstack(subscriber) {
     sanitizeString(subscriber.lastName) ||
     "";
 
-  // Treat any truthy `paid` flag as a paid subscriber; default to free
   const isPaid =
     subscriber.paid === true ||
     subscriber.is_paid === true ||
@@ -155,7 +147,6 @@ async function createOrUpdateGhlContactFromSubstack(subscriber) {
 
   const tags = ["substack", isPaid ? "substack_paid" : "substack_free"];
 
-  // v1 contacts endpoint (API key auth)
   const url = "https://rest.gohighlevel.com/v1/contacts/";
   const headers = {
     Authorization: `Bearer ${GHL_API_KEY}`,
@@ -190,7 +181,6 @@ function parseSlashCommand(input) {
     return null;
   }
 
-  // Split on whitespace; first token is the command
   const firstSpace = text.indexOf(" ");
   const cmd = (firstSpace === -1 ? text : text.slice(0, firstSpace)).toLowerCase();
   const rest = sanitizeString(firstSpace === -1 ? "" : text.slice(firstSpace + 1));
@@ -242,7 +232,7 @@ async function githubRequest(method, url, params = {}, data = null) {
   return response.data;
 }
 
-// ——— AGENT 20 WRITE ENDPOINT (this is where the real brain will live later) ——— //
+// ——— AGENT 20 WRITE ENDPOINT ——— //
 app.post("/agent20-write", async (req, res) => {
   if (RELAY_TOKEN && !authOk(req)) {
     return res.status(401).json({ error: "Unauthorized" });
@@ -254,8 +244,6 @@ app.post("/agent20-write", async (req, res) => {
   }
 
   try {
-    // Right now it just writes straight to Supabase (exactly like before)
-    // Later you’ll put xAI parsing, embeddings, rate-limiting, etc. here
     const url = `${SUPABASE_URL}/rest/v1/brain_queue`;
     const headers = {
       apikey: SUPABASE_SERVICE_ROLE_KEY,
@@ -319,7 +307,7 @@ app.post("/brain-queue", async (req, res) => {
   }
 });
 
-// ——— NEW: SLASH COMMAND INGEST ——— //
+// ——— SLASH COMMAND INGEST ——— //
 app.post("/command", async (req, res) => {
   try {
     if (!authOk(req)) {
@@ -349,7 +337,7 @@ app.post("/command", async (req, res) => {
         source: "ChatGPT",
         metadata: {},
       },
-      parsed.command // meta.from
+      parsed.command 
     );
 
     const inserted = await insertBrainQueueRow(row);
@@ -371,12 +359,8 @@ app.post("/command", async (req, res) => {
 });
 
 // ——— SUBSTACK → GOHIGHLEVEL CONTACT SYNC ——— //
-// Webhook endpoint for Substack.
-// Secure via ?token=... using SUBSTACK_WEBHOOK_TOKEN.
 app.post("/substack-subscriber", async (req, res) => {
   try {
-    // Substack can't set Authorization headers, so we use a URL token:
-    // https://notion-to-discord.fly.dev/substack-subscriber?token=XYZ
     if (SUBSTACK_WEBHOOK_TOKEN) {
       const token =
         sanitizeString(req.query.token) ||
@@ -410,8 +394,6 @@ app.post("/substack-subscriber", async (req, res) => {
 });
 
 // ——— GITHUB PROXY ROUTES ——— //
-
-// List repos visible to the token (for sanity / discovery)
 app.get("/github/repos", async (req, res) => {
   try {
     if (!authOk(req)) {
@@ -426,7 +408,6 @@ app.get("/github/repos", async (req, res) => {
     };
 
     const data = await githubRequest("GET", "https://api.github.com/user/repos", params);
-    // Trim to fields an LLM actually needs
     const repos = data.map((r) => ({
       id: r.id,
       name: r.name,
@@ -445,7 +426,6 @@ app.get("/github/repos", async (req, res) => {
   }
 });
 
-// Fetch a single file's contents from a repo
 app.get("/github/file", async (req, res) => {
   try {
     if (!authOk(req)) {
@@ -455,7 +435,7 @@ app.get("/github/file", async (req, res) => {
     const owner = sanitizeString(req.query.owner);
     const repo = sanitizeString(req.query.repo);
     const path = sanitizeString(req.query.path);
-    const ref = sanitizeString(req.query.ref) || undefined; // branch/commit/sha
+    const ref = sanitizeString(req.query.ref) || undefined;
 
     if (!owner || !repo || !path) {
       return res.status(400).json({
@@ -471,7 +451,6 @@ app.get("/github/file", async (req, res) => {
     const data = await githubRequest("GET", url, ref ? { ref } : {});
 
     if (Array.isArray(data)) {
-      // They requested a directory, not a file
       const listing = data.map((item) => ({
         name: item.name,
         path: item.path,
@@ -512,10 +491,10 @@ app.get("/github/file", async (req, res) => {
     res.status(status).json({ ok: false, error: err.message || "GitHub file fetch failed" });
   }
 });
+
 // ——— AGENT 20 READ PROXY ——— //
 app.post("/brain-read", async (req, res) => {
   try {
-    // Front-door auth: same pattern as /brain-queue, /command, /github/*
     if (RELAY_TOKEN && !authOk(req)) {
       return res.status(401).json({ ok: false, error: "Unauthorized" });
     }
@@ -537,11 +516,9 @@ app.post("/brain-read", async (req, res) => {
       });
     }
 
-    // Normalize AGENT_20_URL and build target URL
     const targetBase = AGENT_20_URL.replace(/\/+$/, "");
     const url = `${targetBase}/brain-read`;
 
-    // Relay → Agent 20: send the shared READ_API_KEY header
     const { data } = await axios.post(url, body, {
       headers: {
         "Content-Type": "application/json",
@@ -549,13 +526,10 @@ app.post("/brain-read", async (req, res) => {
       },
     });
 
-    // Pass through whatever Agent 20 returns
     return res.status(200).json(data);
   } catch (err) {
     const status = err.response?.status || 500;
     console.error("Brain read proxy error:", err.response?.data || err.message);
-
-    // Try to surface the backend error if it exists
     const backendError =
       err.response?.data?.error ||
       err.response?.data?.message ||
@@ -569,11 +543,8 @@ app.post("/brain-read", async (req, res) => {
 });
 
 // ——— AGENT 20 CONFLICT LOG RELAY ——— //
-// NOTE: The section that follows this one is: HEALTHCHECK ENDPOINT
-
 app.post("/agent20-conflict-log", async (req, res) => {
   try {
-    // Same auth pattern as /brain-queue, /command, /github/*
     if (RELAY_TOKEN && !authOk(req)) {
       return res.status(401).json({ ok: false, error: "Unauthorized" });
     }
@@ -588,7 +559,6 @@ app.post("/agent20-conflict-log", async (req, res) => {
       });
     }
 
-    // Expect the payload shape created in Agent20's logDigitalConflictEvent.
     const {
       brain,
       conflict_type,
@@ -614,7 +584,6 @@ app.post("/agent20-conflict-log", async (req, res) => {
       source: source || null,
       old_entry: existing_entry || null,
       new_entry: new_entry || null,
-      // Simple emoji legend for manual decisions
       legend: {
         keep_new: "✅ keep new",
         keep_old: "♻️ keep old",
@@ -631,32 +600,42 @@ app.post("/agent20-conflict-log", async (req, res) => {
         await axios.post(DISCORD_WEBHOOK_PERSONAL, messagePayload);
       }
     } catch (e) {
-      console.warn(
-        "Discord conflict fan-out failed:",
-        e.response?.data || e.message
-      );
+      console.warn("Discord conflict fan-out failed:", e.response?.data || e.message);
     }
 
     return res.status(200).json({ ok: true });
   } catch (err) {
     const status = err.status || err.response?.status || 500;
-    console.error(
-      "agent20-conflict-log error:",
-      err.response?.data || err.message
-    );
-    return res
-      .status(status)
-      .json({ ok: false, error: err.message || "Conflict relay failed" });
+    console.error("agent20-conflict-log error:", err.response?.data || err.message);
+    return res.status(status).json({ ok: false, error: err.message || "Conflict relay failed" });
   }
 });
 
 // ——— B-ROLL AGENT ENDPOINT ——— //
+// Phase 3 Cleanup: Strict Requirement for City and Country
 app.post('/api/process-broll', (req, res) => {
+  // Explicit Strict Validation
+  const { city, country } = req.body;
+
+  const isCityValid = typeof city === 'string' && city.trim().length > 0;
+  const isCountryValid = typeof country === 'string' && country.trim().length > 0;
+
+  if (!isCityValid || !isCountryValid) {
+    return res.status(400).json({
+      success: false,
+      error: "Missing or invalid required fields: country, city"
+    });
+  }
+
+  // 2. Spawn Process
   console.log('⚡️ API Trigger: Starting B-Roll Processing...');
   
-  // We spawn the TypeScript process immediately and return a "Work Started" response
-  // This prevents the request from timing out while Gemini thinks.
-  const worker = exec('npx ts-node src/broll/main.ts', (error, stdout, stderr) => {
+  // We pass city as an argument to main.ts. 
+  // Country is validated here but main.ts derives it from the queue folder source of truth.
+  // Note: We wrap city in quotes to handle spaces safely
+  const safeCity = city.replace(/"/g, '\\"');
+  
+  const worker = exec(`npx ts-node src/broll/main.ts "${safeCity}"`, (error, stdout, stderr) => {
     if (error) {
       console.error(`[Worker Error]: ${error.message}`);
       return;
@@ -667,10 +646,9 @@ app.post('/api/process-broll', (req, res) => {
     console.log(`[Worker Output]: ${stdout}`);
   });
 
-  // Respond immediately to the Apple Shortcut
   res.json({ 
     success: true, 
-    message: "B-Roll Agent started. Check server logs for progress.",
+    message: `B-Roll Agent started for ${city}, ${country}.`,
     status: "processing"
   });
 });

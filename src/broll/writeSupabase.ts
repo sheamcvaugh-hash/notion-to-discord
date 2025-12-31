@@ -1,33 +1,46 @@
 // src/broll/writeSupabase.ts
 import { SupabaseClient } from '@supabase/supabase-js';
+import { CanonicalType } from './types';
 
-export async function finalizeDatabaseRecord(
+interface CanonicalRecord {
+  file_name: string;
+  drive_file_id: string;
+  drive_library_path: string;
+  country: string;
+  city: string;
+  type: CanonicalType;
+  tags: string[];
+  summary: string;
+}
+
+/**
+ * Writes the final immutable record to Supabase.
+ * Per Phase 3 lifecycle: This happens AFTER move/rename and BEFORE proxy deletion.
+ */
+export async function writeCanonicalRecord(
   supabase: SupabaseClient,
-  masterFileId: string,
-  finalFileName: string,
-  canonicalPath: string,
-  country: string,
-  city: string,
-  type: string
+  record: CanonicalRecord
 ) {
-  console.log(`\n💾 Finalizing Database Record for ${masterFileId}...`);
+  console.log(`\n💾 Writing Database Record for ${record.file_name}...`);
 
   const { error } = await supabase
     .from('broll_media_index')
-    .update({
-      file_name: finalFileName,
-      canonical_path: canonicalPath,
-      country: country,
-      city: city,
-      type: type,
-      processed_at: new Date().toISOString()
-    })
-    .eq('drive_id', masterFileId); // Primary Key Match
+    .insert({
+      file_name: record.file_name,
+      drive_file_id: record.drive_file_id,
+      drive_library_path: record.drive_library_path,
+      country: record.country,
+      city: record.city,
+      type: record.type,
+      tags: record.tags,
+      summary: record.summary,
+      // created_at / updated_at handled by DB defaults
+    });
 
   if (error) {
     console.error(`❌ DB Write Failed:`, error);
-    throw new Error(`Supabase Update Failed: ${error.message}`);
+    throw new Error(`Supabase Insert Failed: ${error.message}`);
   }
 
-  console.log(`   ✔ Record updated successfully.`);
+  console.log(`   ✔ Record inserted successfully.`);
 }

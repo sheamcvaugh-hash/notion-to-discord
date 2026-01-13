@@ -2,11 +2,12 @@
 import 'dotenv/config';
 import { google } from 'googleapis';
 import { createClient } from '@supabase/supabase-js'; 
-import { scanProcessingQueue } from './scanQueue';
-import { analyzeVideo } from './gemini';
-import { organizeBrollFiles, moveProxyToOutbox } from './organizeDrive';
-import { writeCanonicalRecord } from './writeSupabase';
-import { BrollFile } from './types';
+import { scanProcessingQueue } from './scanQueue.ts';
+import { analyzeVideo } from './gemini.ts';
+import { organizeBrollFiles, moveProxyToOutbox } from './organizeDrive.ts';
+import { writeCanonicalRecord } from './writeSupabase.ts';
+import { buildFinalMasterFilename } from './filename.ts'; // <-- IMPORT ADDED
+import { BrollFile } from './types.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -130,14 +131,27 @@ async function main() {
         const analysis = await analyzeVideo(drive, proxyFile);
 
         console.log(`   + Validated Type: ${analysis.type}`);
-        console.log(`   + Validated Filename: ${analysis.suggested_filename}`);
+        
+        // --- STEP 12 INTEGRATION START ---
+        
+        // Compute Deterministic Name
+        const finalMasterName = buildFinalMasterFilename(
+          analysis.suggested_filename,
+          masterFile.id,
+          masterFile.name
+        );
+
+        // Required Logging
+        console.log(`[Rename] Suggested: ${analysis.suggested_filename}`);
+        console.log(`[Rename] Final: ${finalMasterName}`);
+        
+        // --- STEP 12 INTEGRATION END ---
 
         // Step 5: Organize Master (Renames and Moves Master)
-        // Note: Proxy is NOT touched here anymore to ensure atomicity
         const moveResult = await organizeBrollFiles(
           drive,
           masterFile,
-          analysis.suggested_filename,
+          finalMasterName, // <-- PASSED HERE
           sourceCountry,
           TARGET_CITY,   
           analysis.type
@@ -149,7 +163,7 @@ async function main() {
 
         // Step 6: Write DB
         await writeCanonicalRecord(supabase, {
-            file_name: path.basename(moveResult.newPath),
+            file_name: path.basename(moveResult.newPath), // This picks up the final name from the move result
             drive_file_id: masterFile.id,
             drive_library_path: moveResult.newPath,
             country: sourceCountry,

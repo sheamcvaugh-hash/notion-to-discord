@@ -12,27 +12,20 @@ interface MoveResult {
 }
 
 /**
- * 1) SINGLE NORMALIZATION FUNCTION (MANDATORY)
- * Applies ONLY the allowed rules + TITLE CASING:
+ * 1) SINGLE NORMALIZATION FUNCTION (STRICT COMPLIANCE)
+ * Applies ONLY the allowed rules per Step 8 Brief:
  * - Trim whitespace
  * - Replace / with -
  * - Collapse multiple spaces
  * - Remove leading/trailing dots
- * - ENFORCE TITLE CASE (e.g. "drone" -> "Drone")
+ * - NO CASING CHANGES (Preserves "USA", "iPhone", etc.)
  */
 function normalizeFolderName(input: string): string {
-  const cleaned = input
+  return input
     .trim()
     .replace(/\//g, '-')           // Replace / with -
     .replace(/\s+/g, ' ')          // Collapse multiple spaces
     .replace(/^\.+|\.+$/g, '');    // Remove leading/trailing dots
-  
-  // Apply Title Case to cleaned string
-  return cleaned
-    .toLowerCase()
-    .split(' ')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
 }
 
 /**
@@ -64,7 +57,7 @@ export async function organizeBrollFiles(
   const LIBRARY_ROOT_ID = process.env.GOOGLE_DRIVE_LIBRARY_FOLDER_ID;
   if (!LIBRARY_ROOT_ID) throw new Error('FATAL: GOOGLE_DRIVE_LIBRARY_FOLDER_ID is not set.');
 
-  // Normalize Filename (using same strict rules, NO kebab-case, but Title Case looks nice)
+  // Normalize Filename (Strict rules, NO forced casing)
   const safeFilename = normalizeFolderName(suggestedName);
   
   // Build Deterministic Path

@@ -84,7 +84,7 @@ export function validateGeminiOutput(data: any): AnalysisResult {
     .map((t: any) => String(t).trim().replace(/\s+/g, ' '))
     .filter((t: string) => t.length > 0);
 
-  // Logic: < 3 is failure
+  // Logic: < 3 is failure (RESTORED TO ORIGINAL)
   if (normalizedTags.length < 3) {
     throw new Error(`Validation Failed: Too few tags (${normalizedTags.length}). Minimum 3 required.`);
   }

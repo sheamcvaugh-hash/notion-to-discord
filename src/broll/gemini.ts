@@ -1,4 +1,3 @@
-// src/broll/gemini.ts
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { GoogleAIFileManager, FileState } from '@google/generative-ai/server';
 import fs from 'fs';
@@ -9,17 +8,11 @@ import { BrollFile, AnalysisResult, CanonicalType, validateGeminiOutput } from '
 // UPDATED: Prioritize the specific B-Roll Agent Key, fallback to generic if missing
 const API_KEY = process.env.GEMINI_BROLL_AGENT || process.env.GEMINI_API_KEY || '';
 
+// CONFIGURATION: Locked to the single working model (Option A)
+const GEMINI_MODEL = "gemini-2.0-flash-exp";
+
 const genAI = new GoogleGenerativeAI(API_KEY);
 const fileManager = new GoogleAIFileManager(API_KEY);
-
-// ROBUST MODEL LIST: We try these in order until one works.
-// This handles deprecations (e.g. 001 retiring) automatically.
-const MODELS_TO_TRY = [
-    "gemini-1.5-flash-002",  // Latest Stable Flash
-    "gemini-1.5-pro-002",    // Latest Stable Pro (Backup)
-    "gemini-1.5-flash",      // Generic Alias (Backup 2)
-    "gemini-2.0-flash-exp"   // Experimental (Last Resort)
-];
 
 export async function analyzeVideo(drive: any, file: BrollFile): Promise<AnalysisResult> {
   const tempPath = path.join(os.tmpdir(), file.name);
@@ -102,39 +95,20 @@ export async function analyzeVideo(drive: any, file: BrollFile): Promise<Analysi
       If you cannot comply with strict JSON or these rules, output exactly: INVALID_OUTPUT
     `;
 
-    // 5. Generate Content with Fallback Loop
-    let lastError;
-    let result = null;
-
-    for (const modelName of MODELS_TO_TRY) {
-        try {
-            console.log(`[Gemini]    Trying model: ${modelName}...`);
-            const model = genAI.getGenerativeModel({ model: modelName });
-            
-            result = await model.generateContent([
-              {
-                fileData: {
-                  mimeType: uploadResponse.file.mimeType,
-                  fileUri: uploadResponse.file.uri
-                }
-              },
-              { text: promptText }
-            ]);
-            
-            // If we get here, it worked! Break the loop.
-            console.log(`[Gemini]    Success with ${modelName}!`);
-            break; 
-
-        } catch (err: any) {
-            console.warn(`[Gemini]    Failed on ${modelName} (${err.status || err.message}). Switching...`);
-            lastError = err;
-            // Continue to next model
+    // 5. Generate Content (Single Call - No Retry)
+    console.log(`[Gemini] Using model: ${GEMINI_MODEL}`);
+    
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+    
+    const result = await model.generateContent([
+      {
+        fileData: {
+          mimeType: uploadResponse.file.mimeType,
+          fileUri: uploadResponse.file.uri
         }
-    }
-
-    if (!result) {
-        throw new Error(`All Gemini models failed. Last error: ${lastError?.message}`);
-    }
+      },
+      { text: promptText }
+    ]);
 
     const rawText = result.response.text().trim();
 
@@ -160,8 +134,9 @@ export async function analyzeVideo(drive: any, file: BrollFile): Promise<Analysi
     
     return validatedResult;
 
-  } catch (error) {
-    console.error(`[Gemini] Error analyzing ${file.name}:`, error);
+  } catch (error: any) {
+    // Explicit logging for single-model failure
+    console.error(`[Gemini] Request failed: ${error.message || error}`);
     throw error;
   } finally {
     if (fs.existsSync(tempPath)) {

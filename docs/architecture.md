@@ -6,7 +6,7 @@ This document describes the **current reality** of the B-Roll Processing System.
 
 1.  **Trigger (API):** External request initiates the process for a specific Country + City.
 2.  **Scan (Drive):** System looks for proxy files (`_low`) in `Queue/<Country>/`.
-3.  **Analyze (Gemini):** Proxy is sent to Gemini 1.5 Flash for metadata extraction.
+3.  **Analyze (Gemini):** Proxy is sent to the **single fixed Gemini model** for metadata extraction.
 4.  **Validate (Logic):** AI output is checked against a strict schema (types, forbidden chars).
 5.  **Organize (Drive):** Master file is renamed and moved to `Library/<Country>/<City>/<Type>/`.
 6.  **Index (Supabase):** Metadata is written to `broll_media_index`.
@@ -40,6 +40,8 @@ This document describes the **current reality** of the B-Roll Processing System.
 ### 4. Gemini Analyzer (`src/broll/gemini.ts`)
 * **Role:** Intelligence.
 * **Responsibility:**
+    * Uses a **single, hard-coded model** (currently `gemini-2.0-flash-exp`).
+    * **Strictly One-Shot:** No retries, no model switching, no fallback chain.
     * Uploads temporary proxy to Gemini.
     * Sends **Strict System Prompt**.
     * Returns raw JSON.
